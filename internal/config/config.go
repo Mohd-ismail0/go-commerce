@@ -1,14 +1,17 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
 	AppEnv           string
 	Port             string
 	DatabaseURL      string
+	APIAuthToken     string
 	DefaultRegionID  string
 	DefaultTenantID  string
 	WebhookTimeoutMS int
@@ -17,18 +20,36 @@ type Config struct {
 	LogLevel         string
 }
 
-func Load() Config {
-	return Config{
+func Load() (Config, error) {
+	webhookTimeoutMS, err := getEnvIntInRange("WEBHOOK_TIMEOUT_MS", 3000, 1, 120000)
+	if err != nil {
+		return Config{}, err
+	}
+	httpTimeoutMS, err := getEnvIntInRange("HTTP_TIMEOUT_MS", 10000, 1, 300000)
+	if err != nil {
+		return Config{}, err
+	}
+	httpMaxBodyBytes, err := getEnvIntInRange("HTTP_MAX_BODY_BYTES", 1048576, 1, 104857600)
+	if err != nil {
+		return Config{}, err
+	}
+
+	cfg := Config{
 		AppEnv:           getEnv("APP_ENV", "development"),
 		Port:             getEnv("PORT", "8080"),
 		DatabaseURL:      getEnv("DATABASE_URL", ""),
+		APIAuthToken:     getEnv("API_AUTH_TOKEN", ""),
 		DefaultRegionID:  getEnv("DEFAULT_REGION_ID", "global"),
 		DefaultTenantID:  getEnv("DEFAULT_TENANT_ID", "public"),
-		WebhookTimeoutMS: getEnvInt("WEBHOOK_TIMEOUT_MS", 3000),
-		HTTPTimeoutMS:    getEnvInt("HTTP_TIMEOUT_MS", 10000),
-		HTTPMaxBodyBytes: int64(getEnvInt("HTTP_MAX_BODY_BYTES", 1048576)),
+		WebhookTimeoutMS: webhookTimeoutMS,
+		HTTPTimeoutMS:    httpTimeoutMS,
+		HTTPMaxBodyBytes: int64(httpMaxBodyBytes),
 		LogLevel:         getEnv("LOG_LEVEL", "info"),
 	}
+	if err := validate(cfg); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
 }
 
 func getEnv(key, fallback string) string {
@@ -38,14 +59,25 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-func getEnvInt(key string, fallback int) int {
+func getEnvIntInRange(key string, fallback, min, max int) (int, error) {
 	raw := os.Getenv(key)
 	if raw == "" {
-		return fallback
+		return fallback, nil
 	}
 	parsed, err := strconv.Atoi(raw)
 	if err != nil {
-		return fallback
+		return 0, fmt.Errorf("%s must be an integer", key)
 	}
-	return parsed
+	if parsed < min || parsed > max {
+		return 0, fmt.Errorf("%s must be between %d and %d", key, min, max)
+	}
+	return parsed, nil
+}
+
+func validate(cfg Config) error {
+	appEnv := strings.ToLower(strings.TrimSpace(cfg.AppEnv))
+	if appEnv != "test" && appEnv != "testing" && strings.TrimSpace(cfg.DatabaseURL) == "" {
+		return fmt.Errorf("DATABASE_URL is required when APP_ENV is %q", cfg.AppEnv)
+	}
+	return nil
 }

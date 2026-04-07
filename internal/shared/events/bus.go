@@ -2,6 +2,7 @@ package events
 
 import (
 	"context"
+	"log"
 	"sync"
 )
 
@@ -36,7 +37,9 @@ func (b *Bus) Subscribe(event string, handler Handler) {
 
 func (b *Bus) Publish(ctx context.Context, event string, payload any) {
 	if b.outbox != nil {
-		b.outbox.Enqueue(ctx, tenantIDFromPayload(payload), regionIDFromPayload(payload), event, "domain", "", payload)
+		if err := b.outbox.Enqueue(ctx, tenantIDFromPayload(payload), regionIDFromPayload(payload), event, "domain", "", payload); err != nil {
+			log.Printf("events outbox enqueue failed for %s: %v", event, err)
+		}
 	}
 	b.mu.RLock()
 	handlers := append([]Handler{}, b.subs[event]...)

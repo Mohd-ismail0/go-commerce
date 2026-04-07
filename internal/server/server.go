@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -12,8 +14,7 @@ type RouteRegistrar interface {
 }
 
 type Server struct {
-	port string
-	mux  *chi.Mux
+	httpServer *http.Server
 }
 
 func New(port string, middlewares []func(http.Handler) http.Handler, registrars ...RouteRegistrar) *Server {
@@ -32,9 +33,22 @@ func New(port string, middlewares []func(http.Handler) http.Handler, registrars 
 	for _, reg := range registrars {
 		reg.RegisterRoutes(r)
 	}
-	return &Server{port: port, mux: r}
+	return &Server{
+		httpServer: &http.Server{
+			Addr:    fmt.Sprintf(":%s", port),
+			Handler: r,
+		},
+	}
 }
 
 func (s *Server) Run() error {
-	return http.ListenAndServe(fmt.Sprintf(":%s", s.port), s.mux)
+	err := s.httpServer.ListenAndServe()
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
+}
+
+func (s *Server) Shutdown(ctx context.Context) error {
+	return s.httpServer.Shutdown(ctx)
 }

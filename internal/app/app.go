@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 	"time"
@@ -28,18 +29,25 @@ import (
 )
 
 type App struct {
-	srv *server.Server
+	srv    *server.Server
+	dbConn *sql.DB
+	cancel context.CancelFunc
 }
 
-func New() (*App, error) {
-	cfg := config.Load()
-	ctx := context.Background()
-
-	conn, err := db.Connect(ctx, cfg.DatabaseURL)
+func New(ctx context.Context) (*App, error) {
+	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
 	}
+	appCtx, cancel := context.WithCancel(ctx)
+
+	conn, err := db.Connect(appCtx, cfg.DatabaseURL)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
 	if !db.IsReady(conn) {
+		cancel()
 		return nil, errors.New("database connection is required")
 	}
 
@@ -47,12 +55,18 @@ func New() (*App, error) {
 	bus := events.NewBusWithOutbox(outbox)
 	webhooks := events.NewWebhookDispatcher(time.Duration(cfg.WebhookTimeoutMS) * time.Millisecond)
 	webhooks.Attach(bus)
-	events.NewWorker(outbox, webhooks).Start(ctx)
+	events.NewWorker(outbox, webhooks).Start(appCtx)
 
 	s := server.New(
 		cfg.Port,
 		[]func(http.Handler) http.Handler{
 			middleware.AccessLog(),
+			middleware.APIToken(cfg.APIAuthToken),
+			middleware.RoleGuard(map[string]middleware.RoleValidator{
+				"/payments":       middleware.DefaultRoleValidator,
+				"/identity/users": middleware.DefaultRoleValidator,
+				"/metadata":       middleware.DefaultRoleValidator,
+			}),
 			middleware.Timeout(time.Duration(cfg.HTTPTimeoutMS) * time.Millisecond),
 			middleware.BodyLimit(cfg.HTTPMaxBodyBytes),
 			middleware.TenantRegion(cfg.DefaultTenantID, cfg.DefaultRegionID),
@@ -72,9 +86,21 @@ func New() (*App, error) {
 		metadata.NewHandler(metadata.NewService(metadata.NewRepository(conn))),
 		search.NewHandler(search.NewService(search.NewRepository(conn))),
 	)
-	return &App{srv: s}, nil
+	return &App{
+		srv:    s,
+		dbConn: conn,
+		cancel: cancel,
+	}, nil
 }
 
 func (a *App) Run() error {
 	return a.srv.Run()
+}
+
+func (a *App) Shutdown(ctx context.Context) error {
+	a.cancel()
+	if err := a.srv.Shutdown(ctx); err != nil {
+		return err
+	}
+	return a.dbConn.Close()
 }

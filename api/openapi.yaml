@@ -4,7 +4,20 @@ info:
   version: 0.3.0
 servers:
   - url: http://localhost:8080
+security:
+  - ApiTokenAuth: []
 components:
+  securitySchemes:
+    ApiTokenAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API token
+      description: Static API token from API_AUTH_TOKEN environment variable.
+    RoleHeaderAuth:
+      type: apiKey
+      in: header
+      name: X-Role
+      description: Role header baseline for sensitive routes.
   parameters:
     TenantHeader:
       in: header
@@ -432,6 +445,9 @@ paths:
   /payments:
     get:
       summary: List payments
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
@@ -440,6 +456,9 @@ paths:
           description: Payment list
     post:
       summary: Create or update payment
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
@@ -467,6 +486,9 @@ paths:
   /identity/users:
     get:
       summary: List users
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
@@ -475,6 +497,9 @@ paths:
           description: Users list
     post:
       summary: Create or update user
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
@@ -493,6 +518,9 @@ paths:
   /metadata:
     post:
       summary: Upsert metadata entry
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
