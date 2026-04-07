@@ -32,6 +32,60 @@ CREATE TABLE IF NOT EXISTS products (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS categories (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  region_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  slug TEXT NOT NULL,
+  parent_id TEXT REFERENCES categories(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (tenant_id, region_id, slug)
+);
+
+CREATE TABLE IF NOT EXISTS product_variants (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  region_id TEXT NOT NULL,
+  product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  sku TEXT NOT NULL,
+  name TEXT NOT NULL,
+  price_cents BIGINT NOT NULL,
+  currency TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (tenant_id, region_id, sku)
+);
+
+CREATE TABLE IF NOT EXISTS product_media (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  region_id TEXT NOT NULL,
+  product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  url TEXT NOT NULL,
+  media_type TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS collections (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  region_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  slug TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (tenant_id, region_id, slug)
+);
+
+CREATE TABLE IF NOT EXISTS collection_products (
+  collection_id TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  PRIMARY KEY (collection_id, product_id)
+);
+
 CREATE TABLE IF NOT EXISTS customers (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL,
@@ -117,6 +171,9 @@ CREATE TABLE IF NOT EXISTS webhook_endpoints (
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_products_tenant_region_sku
 ON products (tenant_id, region_id, sku);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_product_variants_tenant_region_sku
+ON product_variants (tenant_id, region_id, sku);
 
 CREATE INDEX IF NOT EXISTS ix_products_tenant_region_created_at
 ON products (tenant_id, region_id, created_at DESC);

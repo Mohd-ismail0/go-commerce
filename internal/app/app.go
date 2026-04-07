@@ -10,7 +10,9 @@ import (
 	"rewrite/internal/config"
 	"rewrite/internal/modules/brands"
 	"rewrite/internal/modules/catalog"
+	"rewrite/internal/modules/checkout"
 	"rewrite/internal/modules/customers"
+	"rewrite/internal/modules/fulfillments"
 	"rewrite/internal/modules/identity"
 	"rewrite/internal/modules/inventory"
 	"rewrite/internal/modules/localization"
@@ -56,6 +58,8 @@ func New(ctx context.Context) (*App, error) {
 	webhooks := events.NewWebhookDispatcher(time.Duration(cfg.WebhookTimeoutMS) * time.Millisecond)
 	webhooks.Attach(bus)
 	events.NewWorker(outbox, webhooks).Start(appCtx)
+	promotionsSvc := promotions.NewService(promotions.NewRepository(conn))
+	pricingSvc := pricing.NewService(pricing.NewRepository(conn), promotionsSvc)
 
 	s := server.New(
 		cfg.Port,
@@ -72,11 +76,13 @@ func New(ctx context.Context) (*App, error) {
 			middleware.TenantRegion(cfg.DefaultTenantID, cfg.DefaultRegionID),
 		},
 		catalog.NewHandler(catalog.NewService(catalog.NewRepository(conn), bus)),
-		orders.NewHandler(orders.NewService(orders.NewRepository(conn), bus)),
+		checkout.NewHandler(checkout.NewService(checkout.NewRepository(conn), bus)),
+		orders.NewHandler(orders.NewService(orders.NewRepository(conn), bus, pricingSvc)),
+		fulfillments.NewHandler(fulfillments.NewService(fulfillments.NewRepository(conn))),
 		customers.NewHandler(customers.NewService(customers.NewRepository(conn))),
 		inventory.NewHandler(inventory.NewService(inventory.NewRepository(conn), bus)),
-		pricing.NewHandler(pricing.NewService(pricing.NewRepository(conn))),
-		promotions.NewHandler(promotions.NewService(promotions.NewRepository(conn))),
+		pricing.NewHandler(pricingSvc),
+		promotions.NewHandler(promotionsSvc),
 		regions.NewHandler(regions.NewService(regions.NewRepository(conn))),
 		brands.NewHandler(brands.NewService(brands.NewRepository(conn))),
 		payments.NewHandler(payments.NewService(payments.NewRepository(conn))),

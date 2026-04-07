@@ -48,7 +48,7 @@ func TestUpdateStatusRejectsInvalidState(t *testing.T) {
 	repo := &fakeRepo{orders: map[string]Order{
 		"ord_1": {ID: "ord_1", TenantID: "tenant_a", Status: "created"},
 	}}
-	svc := NewService(repo, events.NewBus())
+	svc := NewService(repo, events.NewBus(), nil)
 	_, err := svc.UpdateStatus(context.Background(), "tenant_a", StatusUpdateInput{
 		ID:                "ord_1",
 		Status:            "invalid",
@@ -63,7 +63,7 @@ func TestUpdateStatusAllowsCreatedToConfirmed(t *testing.T) {
 	repo := &fakeRepo{orders: map[string]Order{
 		"ord_2": {ID: "ord_2", TenantID: "tenant_a", Status: "created"},
 	}}
-	svc := NewService(repo, events.NewBus())
+	svc := NewService(repo, events.NewBus(), nil)
 	updated, err := svc.UpdateStatus(context.Background(), "tenant_a", StatusUpdateInput{
 		ID:                "ord_2",
 		Status:            "confirmed",

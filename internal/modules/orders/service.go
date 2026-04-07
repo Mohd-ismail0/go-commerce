@@ -5,17 +5,23 @@ import (
 	"strings"
 	"time"
 
+	"rewrite/internal/modules/pricing"
 	sharederrors "rewrite/internal/shared/errors"
 	"rewrite/internal/shared/events"
 )
 
 type Service struct {
-	repo Repository
-	bus  *events.Bus
+	repo       Repository
+	bus        *events.Bus
+	calculator PricingCalculator
 }
 
-func NewService(repo Repository, bus *events.Bus) *Service {
-	return &Service{repo: repo, bus: bus}
+type PricingCalculator interface {
+	Calculate(ctx context.Context, in pricing.CalculationInput) pricing.CalculationResult
+}
+
+func NewService(repo Repository, bus *events.Bus, calculator PricingCalculator) *Service {
+	return &Service{repo: repo, bus: bus, calculator: calculator}
 }
 
 func (s *Service) Create(ctx context.Context, order Order, idempotencyKey string) (Order, error) {
@@ -24,6 +30,19 @@ func (s *Service) Create(ctx context.Context, order Order, idempotencyKey string
 	}
 	if strings.TrimSpace(order.CustomerID) == "" || order.TotalCents <= 0 || len(order.Currency) != 3 {
 		return Order{}, sharederrors.BadRequest("invalid order payload")
+	}
+	if s.calculator != nil {
+		result := s.calculator.Calculate(ctx, pricing.CalculationInput{
+			TenantID:        order.TenantID,
+			RegionID:        order.RegionID,
+			Currency:        order.Currency,
+			BaseAmountCents: order.TotalCents,
+			VoucherCode:     order.VoucherCode,
+			PromotionID:     order.PromotionID,
+			TaxClassID:      order.TaxClassID,
+			CountryCode:     order.CountryCode,
+		})
+		order.TotalCents = result.TotalCents
 	}
 	saved, err := s.repo.Insert(ctx, order, idempotencyKey)
 	if err != nil {

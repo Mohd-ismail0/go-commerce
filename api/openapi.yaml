@@ -114,6 +114,95 @@ components:
           type: integer
           format: int64
           minimum: 1
+    ProductVariant:
+      type: object
+      required: [id, tenant_id, region_id, product_id, sku, name, currency, price_cents]
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        region_id: { type: string }
+        product_id: { type: string }
+        sku: { type: string }
+        name: { type: string }
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+        price_cents:
+          type: integer
+          format: int64
+          minimum: 1
+    ProductVariantInput:
+      type: object
+      required: [sku, name, currency, price_cents]
+      properties:
+        id: { type: string }
+        sku: { type: string }
+        name: { type: string }
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+        price_cents:
+          type: integer
+          format: int64
+          minimum: 1
+    Category:
+      type: object
+      required: [id, tenant_id, region_id, name, slug]
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        region_id: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        parent_id: { type: string }
+    CategoryInput:
+      type: object
+      required: [name, slug]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        parent_id: { type: string }
+    Collection:
+      type: object
+      required: [id, tenant_id, region_id, name, slug]
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        region_id: { type: string }
+        name: { type: string }
+        slug: { type: string }
+    CollectionInput:
+      type: object
+      required: [name, slug]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        slug: { type: string }
+    ProductMedia:
+      type: object
+      required: [id, tenant_id, region_id, product_id, url, media_type]
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        region_id: { type: string }
+        product_id: { type: string }
+        url: { type: string }
+        media_type: { type: string }
+    ProductMediaInput:
+      type: object
+      required: [url, media_type]
+      properties:
+        id: { type: string }
+        url: { type: string }
+        media_type: { type: string }
+    ItemsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {}
     OrderListResponse:
       type: object
       required: [items, pagination]
@@ -167,6 +256,14 @@ components:
         currency:
           type: string
           pattern: "^[A-Z]{3}$"
+        voucher_code:
+          type: string
+        promotion_id:
+          type: string
+        tax_class_id:
+          type: string
+        country_code:
+          type: string
     OrderStatusUpdate:
       type: object
       required: [id, status, expected_updated_at]
@@ -204,6 +301,63 @@ components:
         region_id: { type: string }
         product_id: { type: string }
         quantity: { type: integer, format: int64 }
+    TaxClass:
+      type: object
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        region_id: { type: string }
+        name: { type: string }
+    TaxRate:
+      type: object
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        region_id: { type: string }
+        tax_class_id: { type: string }
+        country_code: { type: string }
+        rate_basis_points: { type: integer, format: int64 }
+    Voucher:
+      type: object
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        region_id: { type: string }
+        code: { type: string }
+        discount_type: { type: string }
+        value_cents: { type: integer, format: int64 }
+        currency: { type: string }
+        usage_limit: { type: integer, format: int64, nullable: true }
+        used_count: { type: integer, format: int64 }
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+    PromotionRule:
+      type: object
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        region_id: { type: string }
+        promotion_id: { type: string }
+        rule_type: { type: string }
+        value_cents: { type: integer, format: int64 }
+        currency: { type: string }
+    PricingCalculationInput:
+      type: object
+      required: [currency, base_amount_cents]
+      properties:
+        currency: { type: string }
+        base_amount_cents: { type: integer, format: int64 }
+        voucher_code: { type: string }
+        promotion_id: { type: string }
+        tax_class_id: { type: string }
+        country_code: { type: string }
+    PricingCalculationResult:
+      type: object
+      properties:
+        base_amount_cents: { type: integer, format: int64 }
+        discount_cents: { type: integer, format: int64 }
+        tax_cents: { type: integer, format: int64 }
+        total_cents: { type: integer, format: int64 }
 paths:
   /products:
     get:
@@ -340,6 +494,213 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /products/{product_id}/variants:
+    get:
+      summary: List product variants
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: product_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Product variants
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ItemsResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/ProductVariant"
+    post:
+      summary: Create product variant
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: product_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductVariantInput"
+      responses:
+        "201":
+          description: Variant created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductVariant"
+    patch:
+      summary: Update product variant
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: product_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductVariantInput"
+      responses:
+        "201":
+          description: Variant updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductVariant"
+  /products/{product_id}/media:
+    get:
+      summary: List product media
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: product_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Product media
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ItemsResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/ProductMedia"
+    post:
+      summary: Create product media
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: product_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductMediaInput"
+      responses:
+        "201":
+          description: Product media created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductMedia"
+  /categories:
+    get:
+      summary: List categories
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Category list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ItemsResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Category"
+    post:
+      summary: Create category
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryInput"
+      responses:
+        "201":
+          description: Category created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+  /collections:
+    get:
+      summary: List collections
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Collection list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ItemsResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Collection"
+    post:
+      summary: Create collection
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CollectionInput"
+      responses:
+        "201":
+          description: Collection created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Collection"
+  /collections/{collection_id}/products/{product_id}:
+    post:
+      summary: Assign product to collection
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: collection_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: product_id
+          required: true
+          schema: { type: string }
+      responses:
+        "201":
+          description: Product assigned to collection
   /customers:
     get:
       summary: List customers
@@ -374,6 +735,59 @@ paths:
       responses:
         "201":
           description: Pricing entry saved
+  /pricing/tax-classes:
+    get:
+      summary: List tax classes
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Tax classes list
+    post:
+      summary: Create or update tax class
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "201":
+          description: Tax class saved
+  /pricing/tax-rates:
+    get:
+      summary: List tax rates
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Tax rates list
+    post:
+      summary: Create or update tax rate
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "201":
+          description: Tax rate saved
+  /pricing/calculate:
+    post:
+      summary: Calculate deterministic price with discount and tax
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PricingCalculationInput"
+      responses:
+        "200":
+          description: Calculation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingCalculationResult"
   /inventory:
     get:
       summary: List inventory
@@ -408,6 +822,40 @@ paths:
       responses:
         "201":
           description: Promotion saved
+  /promotions/rules:
+    get:
+      summary: List promotion rules
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Promotion rules list
+    post:
+      summary: Create or update promotion rule
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "201":
+          description: Promotion rule saved
+  /promotions/vouchers:
+    get:
+      summary: List vouchers
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Vouchers list
+    post:
+      summary: Create or update voucher
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "201":
+          description: Voucher saved
   /regions:
     get:
       summary: List regions

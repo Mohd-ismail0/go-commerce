@@ -20,7 +20,7 @@ type orderFakeRepo struct {
 
 func TestOrdersCreateRequiresIdempotencyKey(t *testing.T) {
 	repo := &orderFakeRepo{orders: map[string]Order{}}
-	h := NewHandler(NewService(repo, events.NewBus()))
+	h := NewHandler(NewService(repo, events.NewBus(), nil))
 	r := chi.NewRouter()
 	r.Use(middleware.TenantRegion("public", "global"))
 	h.RegisterRoutes(r)
@@ -75,7 +75,7 @@ func TestOrdersListIsTenantScoped(t *testing.T) {
 			"o2": {ID: "o2", TenantID: "tenant_b", Status: "created"},
 		},
 	}
-	h := NewHandler(NewService(repo, events.NewBus()))
+	h := NewHandler(NewService(repo, events.NewBus(), nil))
 	r := chi.NewRouter()
 	r.Use(middleware.TenantRegion("public", "global"))
 	h.RegisterRoutes(r)
