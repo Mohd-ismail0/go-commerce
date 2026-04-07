@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Rewrite Commerce API
-  version: 0.2.0
+  version: 0.3.0
 servers:
   - url: http://localhost:8080
 components:
@@ -18,65 +18,154 @@ components:
       required: true
       schema:
         type: string
+    IdempotencyHeader:
+      in: header
+      name: Idempotency-Key
+      required: true
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
   schemas:
     ErrorResponse:
       type: object
-      required: [error]
+      required: [code, message]
       properties:
-        error:
+        code:
           type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+    PaginationMeta:
+      type: object
+      required: [next_cursor]
+      properties:
+        next_cursor:
+          type: string
+    ProductListResponse:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Product"
+        pagination:
+          $ref: "#/components/schemas/PaginationMeta"
     Product:
       type: object
       required: [id, tenant_id, region_id, sku, name, currency, price_cents]
       properties:
-        id: { type: string }
-        tenant_id: { type: string }
-        region_id: { type: string }
-        sku: { type: string }
-        name: { type: string }
-        currency: { type: string }
-        price_cents: { type: integer, format: int64 }
+        id:
+          type: string
+          minLength: 3
+        tenant_id:
+          type: string
+        region_id:
+          type: string
+        sku:
+          type: string
+          minLength: 1
+          maxLength: 64
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+        price_cents:
+          type: integer
+          format: int64
+          minimum: 1
     ProductInput:
       type: object
       required: [sku, name, currency, price_cents]
       properties:
-        id: { type: string }
-        sku: { type: string }
-        name: { type: string }
-        currency: { type: string }
-        price_cents: { type: integer, format: int64 }
+        id:
+          type: string
+        sku:
+          type: string
+          minLength: 1
+          maxLength: 64
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+        price_cents:
+          type: integer
+          format: int64
+          minimum: 1
+    OrderListResponse:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Order"
+        pagination:
+          $ref: "#/components/schemas/PaginationMeta"
     Order:
       type: object
       required: [id, tenant_id, region_id, customer_id, status, total_cents, currency]
       properties:
-        id: { type: string }
-        tenant_id: { type: string }
-        region_id: { type: string }
-        customer_id: { type: string }
+        id:
+          type: string
+        tenant_id:
+          type: string
+        region_id:
+          type: string
+        customer_id:
+          type: string
         status:
           type: string
           enum: [created, confirmed, completed, cancelled]
-        total_cents: { type: integer, format: int64 }
-        currency: { type: string }
+        total_cents:
+          type: integer
+          format: int64
+          minimum: 1
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+        updated_at:
+          type: string
+          format: date-time
     OrderCreateInput:
       type: object
       required: [customer_id, total_cents, currency]
       properties:
-        id: { type: string }
-        customer_id: { type: string }
+        id:
+          type: string
+        customer_id:
+          type: string
         status:
           type: string
           enum: [created]
-        total_cents: { type: integer, format: int64 }
-        currency: { type: string }
+        total_cents:
+          type: integer
+          format: int64
+          minimum: 1
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
     OrderStatusUpdate:
       type: object
-      required: [id, status]
+      required: [id, status, expected_updated_at]
       properties:
-        id: { type: string }
+        id:
+          type: string
         status:
           type: string
           enum: [created, confirmed, completed, cancelled]
+        expected_updated_at:
+          type: string
+          format: date-time
     Customer:
       type: object
       properties:
@@ -110,6 +199,17 @@ paths:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
         - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - in: query
+          name: cursor
+          schema:
+            type: string
+        - in: query
           name: sku
           schema:
             type: string
@@ -119,9 +219,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Product"
+                $ref: "#/components/schemas/ProductListResponse"
         "400":
           description: Invalid tenant/region
           content:
@@ -130,9 +228,11 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
     post:
       summary: Create or update product
+      description: Idempotent upsert by product ID; retries with same payload are safe.
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
+        - $ref: "#/components/parameters/IdempotencyHeader"
       requestBody:
         required: true
         content:
@@ -146,26 +246,43 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Product"
+        "400":
+          description: Validation failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /orders:
     get:
       summary: List orders
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - in: query
+          name: cursor
+          schema:
+            type: string
       responses:
         "200":
           description: Order list
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Order"
+                $ref: "#/components/schemas/OrderListResponse"
     post:
       summary: Create order
+      description: Idempotent create by `Idempotency-Key` per tenant.
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
+        - $ref: "#/components/parameters/IdempotencyHeader"
       requestBody:
         required: true
         content:
@@ -181,6 +298,7 @@ paths:
                 $ref: "#/components/schemas/Order"
     patch:
       summary: Update order status
+      description: Allowed transitions: created->confirmed/cancelled, confirmed->completed/cancelled.
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
@@ -199,6 +317,12 @@ paths:
                 $ref: "#/components/schemas/Order"
         "400":
           description: Invalid status transition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Optimistic concurrency conflict
           content:
             application/json:
               schema:

@@ -3,7 +3,9 @@ package catalog
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"rewrite/internal/shared/middleware"
@@ -29,12 +31,36 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	tenantID := middleware.TenantIDFromContext(r.Context())
 	regionID := middleware.RegionIDFromContext(r.Context())
 	sku := strings.TrimSpace(r.URL.Query().Get("sku"))
-	items, err := h.svc.List(r.Context(), tenantID, regionID, sku)
+	limit := int32(20)
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = int32(parsed)
+		}
+	}
+	var cursor *time.Time
+	if raw := strings.TrimSpace(r.URL.Query().Get("cursor")); raw != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid cursor"})
+			return
+		}
+		cursor = &parsed
+	}
+	items, err := h.svc.List(r.Context(), tenantID, regionID, sku, cursor, limit)
 	if err != nil {
-		utils.JSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list products"})
+		utils.WriteError(w, err)
 		return
 	}
-	utils.JSON(w, http.StatusOK, items)
+	nextCursor := ""
+	if len(items) > 0 {
+		nextCursor = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	utils.JSON(w, http.StatusOK, map[string]any{
+		"items": items,
+		"pagination": map[string]any{
+			"next_cursor": nextCursor,
+		},
+	})
 }
 
 func (h *Handler) upsert(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +76,7 @@ func (h *Handler) upsert(w http.ResponseWriter, r *http.Request) {
 	}
 	saved, err := h.svc.Save(r.Context(), p)
 	if err != nil {
-		utils.JSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save product"})
+		utils.WriteError(w, err)
 		return
 	}
 	utils.JSON(w, http.StatusCreated, saved)

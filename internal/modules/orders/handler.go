@@ -2,8 +2,10 @@ package orders
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"rewrite/internal/shared/middleware"
@@ -29,12 +31,36 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	tenantID := middleware.TenantIDFromContext(r.Context())
 	regionID := middleware.RegionIDFromContext(r.Context())
-	items, err := h.svc.List(r.Context(), tenantID, regionID)
+	limit := int32(20)
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = int32(parsed)
+		}
+	}
+	var cursor *time.Time
+	if raw := strings.TrimSpace(r.URL.Query().Get("cursor")); raw != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid cursor"})
+			return
+		}
+		cursor = &parsed
+	}
+	items, err := h.svc.List(r.Context(), tenantID, regionID, cursor, limit)
 	if err != nil {
-		utils.JSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list orders"})
+		utils.WriteError(w, err)
 		return
 	}
-	utils.JSON(w, http.StatusOK, items)
+	nextCursor := ""
+	if len(items) > 0 {
+		nextCursor = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	utils.JSON(w, http.StatusOK, map[string]any{
+		"items": items,
+		"pagination": map[string]any{
+			"next_cursor": nextCursor,
+		},
+	})
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
@@ -48,9 +74,10 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	if o.ID == "" {
 		o.ID = utils.NewID("ord")
 	}
-	saved, err := h.svc.Create(r.Context(), o)
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	saved, err := h.svc.Create(r.Context(), o, idempotencyKey)
 	if err != nil {
-		utils.JSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create order"})
+		utils.WriteError(w, err)
 		return
 	}
 	utils.JSON(w, http.StatusCreated, saved)
@@ -58,21 +85,27 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) updateStatus(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ID     string `json:"id"`
-		Status string `json:"status"`
+		ID                string `json:"id"`
+		Status            string `json:"status"`
+		ExpectedUpdatedAt string `json:"expected_updated_at"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		utils.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
 	tenantID := middleware.TenantIDFromContext(r.Context())
-	updated, err := h.svc.UpdateStatus(r.Context(), tenantID, req.ID, req.Status)
+	expected, err := time.Parse(time.RFC3339Nano, req.ExpectedUpdatedAt)
 	if err != nil {
-		if errors.Is(err, ErrInvalidStatusTransition) {
-			utils.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		utils.JSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update order"})
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid expected_updated_at"})
+		return
+	}
+	updated, err := h.svc.UpdateStatus(r.Context(), tenantID, StatusUpdateInput{
+		ID:                req.ID,
+		Status:            req.Status,
+		ExpectedUpdatedAt: expected,
+	})
+	if err != nil {
+		utils.WriteError(w, err)
 		return
 	}
 	utils.JSON(w, http.StatusOK, updated)

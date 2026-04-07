@@ -3,13 +3,14 @@ package catalog
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	dbsqlc "rewrite/internal/shared/db/sqlc"
 )
 
 type Repository interface {
 	Upsert(ctx context.Context, product Product) (Product, error)
-	List(ctx context.Context, tenantID, regionID, sku string) ([]Product, error)
+	List(ctx context.Context, tenantID, regionID, sku string, cursor *time.Time, limit int32) ([]Product, error)
 }
 
 type PostgresRepository struct {
@@ -44,11 +45,13 @@ func (r *PostgresRepository) Upsert(ctx context.Context, product Product) (Produ
 	}, nil
 }
 
-func (r *PostgresRepository) List(ctx context.Context, tenantID, regionID, sku string) ([]Product, error) {
+func (r *PostgresRepository) List(ctx context.Context, tenantID, regionID, sku string, cursor *time.Time, limit int32) ([]Product, error) {
 	rows, err := r.queries.ListProductsByTenantRegion(ctx, dbsqlc.ListProductsByTenantRegionParams{
 		TenantID: tenantID,
 		RegionID: regionID,
 		Sku:      sku,
+		Cursor:   cursor,
+		Limit:    limit,
 	})
 	if err != nil {
 		return nil, err

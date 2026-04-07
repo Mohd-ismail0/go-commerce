@@ -10,7 +10,7 @@ RETURNING id, tenant_id, region_id, customer_id, status, total_cents, currency, 
 -- name: UpdateOrderStatus :one
 UPDATE orders
 SET status = $3, updated_at = NOW()
-WHERE id = $1 AND tenant_id = $2
+WHERE id = $1 AND tenant_id = $2 AND updated_at = $4
 RETURNING id, tenant_id, region_id, customer_id, status, total_cents, currency, created_at, updated_at;
 
 -- name: GetOrderByID :one
@@ -23,4 +23,5 @@ SELECT id, tenant_id, region_id, customer_id, status, total_cents, currency, cre
 FROM orders
 WHERE tenant_id = $1
   AND ($2::text = '' OR region_id = $2)
+  AND ($3::timestamptz IS NULL OR created_at < $3)
 ORDER BY created_at DESC;

@@ -3,6 +3,7 @@ package sqlc
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 )
 
@@ -59,6 +60,8 @@ type ListProductsByTenantRegionParams struct {
 	TenantID string
 	RegionID string
 	Sku      string
+	Cursor   *time.Time
+	Limit    int32
 }
 
 func (q *Queries) ListProductsByTenantRegion(ctx context.Context, arg ListProductsByTenantRegionParams) ([]Product, error) {
@@ -68,8 +71,10 @@ FROM products
 WHERE tenant_id = $1
 AND ($2::text = '' OR region_id = $2)
 AND ($3::text = '' OR sku = $3)
+AND ($4::timestamptz IS NULL OR created_at < $4)
 ORDER BY created_at DESC
-`, arg.TenantID, arg.RegionID, arg.Sku)
+LIMIT $5
+`, arg.TenantID, arg.RegionID, arg.Sku, arg.Cursor, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -119,26 +124,32 @@ RETURNING id, tenant_id, region_id, customer_id, status, total_cents, currency, 
 }
 
 type UpdateOrderStatusParams struct {
-	ID       string
-	TenantID string
-	Status   string
+	ID                string
+	TenantID          string
+	Status            string
+	ExpectedUpdatedAt time.Time
 }
 
 func (q *Queries) UpdateOrderStatus(ctx context.Context, arg UpdateOrderStatusParams) (Order, error) {
 	row := q.db.QueryRowContext(ctx, `
 UPDATE orders
 SET status = $3, updated_at = NOW()
-WHERE id = $1 AND tenant_id = $2
+WHERE id = $1 AND tenant_id = $2 AND updated_at = $4
 RETURNING id, tenant_id, region_id, customer_id, status, total_cents, currency, created_at, updated_at
-`, arg.ID, arg.TenantID, arg.Status)
+`, arg.ID, arg.TenantID, arg.Status, arg.ExpectedUpdatedAt)
 	var o Order
 	err := row.Scan(&o.ID, &o.TenantID, &o.RegionID, &o.CustomerID, &o.Status, &o.TotalCents, &o.Currency, &o.CreatedAt, &o.UpdatedAt)
+	if err != nil && errors.Is(err, sql.ErrNoRows) {
+		return Order{}, sql.ErrNoRows
+	}
 	return o, err
 }
 
 type ListOrdersByTenantRegionParams struct {
 	TenantID string
 	RegionID string
+	Cursor   *time.Time
+	Limit    int32
 }
 
 func (q *Queries) ListOrdersByTenantRegion(ctx context.Context, arg ListOrdersByTenantRegionParams) ([]Order, error) {
@@ -147,8 +158,10 @@ SELECT id, tenant_id, region_id, customer_id, status, total_cents, currency, cre
 FROM orders
 WHERE tenant_id = $1
 AND ($2::text = '' OR region_id = $2)
+AND ($3::timestamptz IS NULL OR created_at < $3)
 ORDER BY created_at DESC
-`, arg.TenantID, arg.RegionID)
+LIMIT $4
+`, arg.TenantID, arg.RegionID, arg.Cursor, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -162,4 +175,41 @@ ORDER BY created_at DESC
 		out = append(out, o)
 	}
 	return out, rows.Err()
+}
+
+func (q *Queries) GetIdempotencyResource(ctx context.Context, tenantID, scope, key string) (string, error) {
+	row := q.db.QueryRowContext(ctx, `
+SELECT resource_id FROM idempotency_keys
+WHERE tenant_id = $1 AND scope = $2 AND idempotency_key = $3
+`, tenantID, scope, key)
+	var resourceID string
+	err := row.Scan(&resourceID)
+	return resourceID, err
+}
+
+func (q *Queries) SaveIdempotencyResource(ctx context.Context, tenantID, scope, key, resourceID string) error {
+	_, err := q.db.ExecContext(ctx, `
+INSERT INTO idempotency_keys (tenant_id, scope, idempotency_key, resource_id, created_at)
+VALUES ($1, $2, $3, $4, NOW())
+ON CONFLICT (tenant_id, scope, idempotency_key) DO NOTHING
+`, tenantID, scope, key, resourceID)
+	return err
+}
+
+func (q *Queries) InsertOrderAudit(ctx context.Context, tenantID, regionID, orderID, prevStatus, newStatus string) error {
+	_, err := q.db.ExecContext(ctx, `
+INSERT INTO order_status_audit (tenant_id, region_id, order_id, previous_status, new_status, changed_at)
+VALUES ($1, $2, $3, $4, $5, NOW())
+`, tenantID, regionID, orderID, prevStatus, newStatus)
+	return err
+}
+
+func (q *Queries) GetOrderByID(ctx context.Context, tenantID, orderID string) (Order, error) {
+	row := q.db.QueryRowContext(ctx, `
+SELECT id, tenant_id, region_id, customer_id, status, total_cents, currency, created_at, updated_at
+FROM orders WHERE id = $1 AND tenant_id = $2
+`, orderID, tenantID)
+	var o Order
+	err := row.Scan(&o.ID, &o.TenantID, &o.RegionID, &o.CustomerID, &o.Status, &o.TotalCents, &o.Currency, &o.CreatedAt, &o.UpdatedAt)
+	return o, err
 }

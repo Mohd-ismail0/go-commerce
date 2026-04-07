@@ -1,5 +1,7 @@
 package orders
 
+import "time"
+
 type Order struct {
 	ID         string `json:"id"`
 	TenantID   string `json:"tenant_id"`
@@ -8,4 +10,11 @@ type Order struct {
 	Status     string `json:"status"`
 	TotalCents int64  `json:"total_cents"`
 	Currency   string `json:"currency"`
+	UpdatedAt  string `json:"updated_at,omitempty"`
+}
+
+type StatusUpdateInput struct {
+	ID                string
+	Status            string
+	ExpectedUpdatedAt time.Time
 }
