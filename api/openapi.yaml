@@ -1,0 +1,100 @@
+openapi: 3.0.3
+info:
+  title: Rewrite Commerce API
+  version: 0.1.0
+servers:
+  - url: http://localhost:8080
+paths:
+  /products:
+    get:
+      summary: List products
+      responses:
+        "200":
+          description: Product list
+    post:
+      summary: Create or update product
+      responses:
+        "201":
+          description: Product created
+  /orders:
+    get:
+      summary: List orders
+      responses:
+        "200":
+          description: Order list
+    post:
+      summary: Create order
+      responses:
+        "201":
+          description: Order created
+    patch:
+      summary: Update order status
+      responses:
+        "200":
+          description: Order updated
+  /customers:
+    get:
+      summary: List customers
+      responses:
+        "200":
+          description: Customer list
+    post:
+      summary: Create or update customer
+      responses:
+        "201":
+          description: Customer saved
+  /pricing:
+    get:
+      summary: List pricing entries
+      responses:
+        "200":
+          description: Price entries
+    post:
+      summary: Create or update pricing entry
+      responses:
+        "201":
+          description: Pricing entry saved
+  /inventory:
+    get:
+      summary: List inventory
+      responses:
+        "200":
+          description: Inventory list
+    post:
+      summary: Create or update inventory item
+      responses:
+        "201":
+          description: Inventory item saved
+  /promotions:
+    get:
+      summary: List promotions
+      responses:
+        "200":
+          description: Promotions list
+    post:
+      summary: Create or update promotion
+      responses:
+        "201":
+          description: Promotion saved
+  /regions:
+    get:
+      summary: List regions
+      responses:
+        "200":
+          description: Regions list
+    post:
+      summary: Create or update region
+      responses:
+        "201":
+          description: Region saved
+  /brands:
+    get:
+      summary: List brands
+      responses:
+        "200":
+          description: Brand list
+    post:
+      summary: Create or update brand
+      responses:
+        "201":
+          description: Brand saved
