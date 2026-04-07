@@ -18,6 +18,14 @@ type Server struct {
 
 func New(port string, middlewares []func(http.Handler) http.Handler, registrars ...RouteRegistrar) *Server {
 	r := chi.NewRouter()
+	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	r.Get("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ready"))
+	})
 	for _, m := range middlewares {
 		r.Use(m)
 	}

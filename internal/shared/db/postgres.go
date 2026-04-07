@@ -25,3 +25,7 @@ func Connect(ctx context.Context, databaseURL string) (*sql.DB, error) {
 	}
 	return conn, nil
 }
+
+func IsReady(conn *sql.DB) bool {
+	return conn != nil
+}

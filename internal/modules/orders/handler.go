@@ -2,6 +2,7 @@ package orders
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -27,7 +28,13 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	tenantID := middleware.TenantIDFromContext(r.Context())
-	utils.JSON(w, http.StatusOK, h.svc.List(r.Context(), tenantID))
+	regionID := middleware.RegionIDFromContext(r.Context())
+	items, err := h.svc.List(r.Context(), tenantID, regionID)
+	if err != nil {
+		utils.JSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list orders"})
+		return
+	}
+	utils.JSON(w, http.StatusOK, items)
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
@@ -38,16 +45,35 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 	o.TenantID = middleware.TenantIDFromContext(r.Context())
 	o.RegionID = middleware.RegionIDFromContext(r.Context())
-	utils.JSON(w, http.StatusCreated, h.svc.Create(r.Context(), o))
+	if o.ID == "" {
+		o.ID = utils.NewID("ord")
+	}
+	saved, err := h.svc.Create(r.Context(), o)
+	if err != nil {
+		utils.JSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create order"})
+		return
+	}
+	utils.JSON(w, http.StatusCreated, saved)
 }
 
 func (h *Handler) updateStatus(w http.ResponseWriter, r *http.Request) {
-	var o Order
-	if err := json.NewDecoder(r.Body).Decode(&o); err != nil {
+	var req struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		utils.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
-	o.TenantID = middleware.TenantIDFromContext(r.Context())
-	o.RegionID = middleware.RegionIDFromContext(r.Context())
-	utils.JSON(w, http.StatusOK, h.svc.UpdateStatus(r.Context(), o))
+	tenantID := middleware.TenantIDFromContext(r.Context())
+	updated, err := h.svc.UpdateStatus(r.Context(), tenantID, req.ID, req.Status)
+	if err != nil {
+		if errors.Is(err, ErrInvalidStatusTransition) {
+			utils.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		utils.JSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update order"})
+		return
+	}
+	utils.JSON(w, http.StatusOK, updated)
 }

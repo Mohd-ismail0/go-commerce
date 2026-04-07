@@ -2,10 +2,12 @@ package app
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
 	"rewrite/internal/config"
+	"rewrite/internal/modules/brands"
 	"rewrite/internal/modules/catalog"
 	"rewrite/internal/modules/customers"
 	"rewrite/internal/modules/inventory"
@@ -13,7 +15,6 @@ import (
 	"rewrite/internal/modules/pricing"
 	"rewrite/internal/modules/promotions"
 	"rewrite/internal/modules/regions"
-	"rewrite/internal/modules/brands"
 	"rewrite/internal/server"
 	"rewrite/internal/shared/db"
 	"rewrite/internal/shared/events"
@@ -28,9 +29,12 @@ func New() (*App, error) {
 	cfg := config.Load()
 	ctx := context.Background()
 
-	_, err := db.Connect(ctx, cfg.DatabaseURL)
+	conn, err := db.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return nil, err
+	}
+	if !db.IsReady(conn) {
+		return nil, errors.New("database connection is required")
 	}
 
 	bus := events.NewBus()
@@ -42,8 +46,8 @@ func New() (*App, error) {
 		[]func(http.Handler) http.Handler{
 			middleware.TenantRegion(cfg.DefaultTenantID, cfg.DefaultRegionID),
 		},
-		catalog.NewHandler(catalog.NewService(catalog.NewRepository(), bus)),
-		orders.NewHandler(orders.NewService(orders.NewRepository(), bus)),
+		catalog.NewHandler(catalog.NewService(catalog.NewRepository(conn), bus)),
+		orders.NewHandler(orders.NewService(orders.NewRepository(conn), bus)),
 		customers.NewHandler(customers.NewService(customers.NewRepository())),
 		inventory.NewHandler(inventory.NewService(inventory.NewRepository(), bus)),
 		pricing.NewHandler(pricing.NewService(pricing.NewRepository())),

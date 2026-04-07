@@ -1,0 +1,10 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    schema: "internal/shared/db/schema.sql"
+    queries: "internal/shared/db/queries"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/shared/db/sqlc"
+        sql_package: "database/sql"

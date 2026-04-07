@@ -7,31 +7,49 @@ import (
 )
 
 type Service struct {
-	repo *Repository
+	repo Repository
 	bus  *events.Bus
 }
 
-func NewService(repo *Repository, bus *events.Bus) *Service {
+func NewService(repo Repository, bus *events.Bus) *Service {
 	return &Service{repo: repo, bus: bus}
 }
 
-func (s *Service) Create(ctx context.Context, order Order) Order {
+func (s *Service) Create(ctx context.Context, order Order) (Order, error) {
 	if order.Status == "" {
 		order.Status = "created"
 	}
-	saved := s.repo.Save(order)
+	saved, err := s.repo.Insert(ctx, order)
+	if err != nil {
+		return Order{}, err
+	}
 	s.bus.Publish(ctx, events.EventOrderCreated, saved)
-	return saved
+	return saved, nil
 }
 
-func (s *Service) UpdateStatus(ctx context.Context, order Order) Order {
-	saved := s.repo.Save(order)
+func (s *Service) UpdateStatus(ctx context.Context, tenantID, orderID, status string) (Order, error) {
+	if !isValidTransition(status) {
+		return Order{}, ErrInvalidStatusTransition
+	}
+	saved, err := s.repo.UpdateStatus(ctx, tenantID, orderID, status)
+	if err != nil {
+		return Order{}, err
+	}
 	if saved.Status == "completed" {
 		s.bus.Publish(ctx, events.EventOrderCompleted, saved)
 	}
-	return saved
+	return saved, nil
 }
 
-func (s *Service) List(_ context.Context, tenantID string) []Order {
-	return s.repo.List(tenantID)
+func (s *Service) List(ctx context.Context, tenantID, regionID string) ([]Order, error) {
+	return s.repo.List(ctx, tenantID, regionID)
+}
+
+func isValidTransition(status string) bool {
+	switch status {
+	case "created", "confirmed", "completed", "cancelled":
+		return true
+	default:
+		return false
+	}
 }

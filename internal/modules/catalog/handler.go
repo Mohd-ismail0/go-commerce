@@ -3,6 +3,7 @@ package catalog
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"rewrite/internal/shared/middleware"
@@ -26,7 +27,14 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	tenantID := middleware.TenantIDFromContext(r.Context())
-	utils.JSON(w, http.StatusOK, h.svc.List(r.Context(), tenantID))
+	regionID := middleware.RegionIDFromContext(r.Context())
+	sku := strings.TrimSpace(r.URL.Query().Get("sku"))
+	items, err := h.svc.List(r.Context(), tenantID, regionID, sku)
+	if err != nil {
+		utils.JSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list products"})
+		return
+	}
+	utils.JSON(w, http.StatusOK, items)
 }
 
 func (h *Handler) upsert(w http.ResponseWriter, r *http.Request) {
@@ -37,5 +45,13 @@ func (h *Handler) upsert(w http.ResponseWriter, r *http.Request) {
 	}
 	p.TenantID = middleware.TenantIDFromContext(r.Context())
 	p.RegionID = middleware.RegionIDFromContext(r.Context())
-	utils.JSON(w, http.StatusCreated, h.svc.Save(r.Context(), p))
+	if p.ID == "" {
+		p.ID = utils.NewID("prd")
+	}
+	saved, err := h.svc.Save(r.Context(), p)
+	if err != nil {
+		utils.JSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save product"})
+		return
+	}
+	utils.JSON(w, http.StatusCreated, saved)
 }
