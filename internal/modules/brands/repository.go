@@ -1,29 +1,43 @@
 package brands
 
-import "sync"
+import "database/sql"
 
 type Repository struct {
-	mu     sync.RWMutex
-	brands map[string]Brand
+	db *sql.DB
 }
 
-func NewRepository() *Repository {
-	return &Repository{brands: map[string]Brand{}}
+func NewRepository(db *sql.DB) *Repository {
+	return &Repository{db: db}
 }
 
 func (r *Repository) Save(brand Brand) Brand {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.brands[brand.ID] = brand
+	_, _ = r.db.Exec(`
+INSERT INTO brands (id, tenant_id, region_id, name, default_locale, default_currency, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+ON CONFLICT (id) DO UPDATE SET
+tenant_id = EXCLUDED.tenant_id,
+region_id = EXCLUDED.region_id,
+name = EXCLUDED.name,
+default_locale = EXCLUDED.default_locale,
+default_currency = EXCLUDED.default_currency,
+updated_at = NOW()
+`, brand.ID, brand.TenantID, brand.RegionID, brand.Name, brand.DefaultLocale, brand.DefaultCurrency)
 	return brand
 }
 
 func (r *Repository) List(tenantID string) []Brand {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	out := make([]Brand, 0, len(r.brands))
-	for _, b := range r.brands {
-		if b.TenantID == tenantID {
+	rows, err := r.db.Query(`
+SELECT id, tenant_id, region_id, name, default_locale, default_currency FROM brands
+WHERE tenant_id = $1 ORDER BY created_at DESC
+`, tenantID)
+	if err != nil {
+		return []Brand{}
+	}
+	defer rows.Close()
+	out := []Brand{}
+	for rows.Next() {
+		var b Brand
+		if err := rows.Scan(&b.ID, &b.TenantID, &b.RegionID, &b.Name, &b.DefaultLocale, &b.DefaultCurrency); err == nil {
 			out = append(out, b)
 		}
 	}

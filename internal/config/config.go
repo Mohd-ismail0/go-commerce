@@ -12,6 +12,9 @@ type Config struct {
 	DefaultRegionID  string
 	DefaultTenantID  string
 	WebhookTimeoutMS int
+	HTTPTimeoutMS    int
+	HTTPMaxBodyBytes int64
+	LogLevel         string
 }
 
 func Load() Config {
@@ -22,6 +25,9 @@ func Load() Config {
 		DefaultRegionID:  getEnv("DEFAULT_REGION_ID", "global"),
 		DefaultTenantID:  getEnv("DEFAULT_TENANT_ID", "public"),
 		WebhookTimeoutMS: getEnvInt("WEBHOOK_TIMEOUT_MS", 3000),
+		HTTPTimeoutMS:    getEnvInt("HTTP_TIMEOUT_MS", 10000),
+		HTTPMaxBodyBytes: int64(getEnvInt("HTTP_MAX_BODY_BYTES", 1048576)),
+		LogLevel:         getEnv("LOG_LEVEL", "info"),
 	}
 }
 

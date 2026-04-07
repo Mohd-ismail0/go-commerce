@@ -330,66 +330,181 @@ paths:
   /customers:
     get:
       summary: List customers
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
       responses:
         "200":
           description: Customer list
     post:
       summary: Create or update customer
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
       responses:
         "201":
           description: Customer saved
   /pricing:
     get:
       summary: List pricing entries
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
       responses:
         "200":
           description: Price entries
     post:
       summary: Create or update pricing entry
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
       responses:
         "201":
           description: Pricing entry saved
   /inventory:
     get:
       summary: List inventory
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
       responses:
         "200":
           description: Inventory list
     post:
       summary: Create or update inventory item
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
       responses:
         "201":
           description: Inventory item saved
   /promotions:
     get:
       summary: List promotions
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
       responses:
         "200":
           description: Promotions list
     post:
       summary: Create or update promotion
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
       responses:
         "201":
           description: Promotion saved
   /regions:
     get:
       summary: List regions
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
       responses:
         "200":
           description: Regions list
     post:
       summary: Create or update region
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
       responses:
         "201":
           description: Region saved
   /brands:
     get:
       summary: List brands
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
       responses:
         "200":
           description: Brand list
     post:
       summary: Create or update brand
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
       responses:
         "201":
           description: Brand saved
+  /payments:
+    get:
+      summary: List payments
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Payment list
+    post:
+      summary: Create or update payment
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - $ref: "#/components/parameters/IdempotencyHeader"
+      responses:
+        "201":
+          description: Payment saved
+  /shipping/methods:
+    get:
+      summary: List shipping methods
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Shipping method list
+    post:
+      summary: Create or update shipping method
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "201":
+          description: Shipping method saved
+  /identity/users:
+    get:
+      summary: List users
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Users list
+    post:
+      summary: Create or update user
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "201":
+          description: User saved
+  /translations:
+    post:
+      summary: Upsert translation
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "201":
+          description: Translation saved
+  /metadata:
+    post:
+      summary: Upsert metadata entry
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "201":
+          description: Metadata saved
+  /search/index:
+    post:
+      summary: Index search document
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "201":
+          description: Search document indexed

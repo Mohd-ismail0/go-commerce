@@ -1,29 +1,43 @@
 package pricing
 
-import "sync"
+import "database/sql"
 
 type Repository struct {
-	mu      sync.RWMutex
-	entries map[string]PriceBookEntry
+	db *sql.DB
 }
 
-func NewRepository() *Repository {
-	return &Repository{entries: map[string]PriceBookEntry{}}
+func NewRepository(db *sql.DB) *Repository {
+	return &Repository{db: db}
 }
 
 func (r *Repository) Save(entry PriceBookEntry) PriceBookEntry {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.entries[entry.ID] = entry
+	_, _ = r.db.Exec(`
+INSERT INTO price_book_entries (id, tenant_id, region_id, product_id, currency, amount_cents, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+ON CONFLICT (id) DO UPDATE SET
+tenant_id = EXCLUDED.tenant_id,
+region_id = EXCLUDED.region_id,
+product_id = EXCLUDED.product_id,
+currency = EXCLUDED.currency,
+amount_cents = EXCLUDED.amount_cents,
+updated_at = NOW()
+`, entry.ID, entry.TenantID, entry.RegionID, entry.ProductID, entry.Currency, entry.AmountCents)
 	return entry
 }
 
 func (r *Repository) List(tenantID string) []PriceBookEntry {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	out := make([]PriceBookEntry, 0, len(r.entries))
-	for _, e := range r.entries {
-		if e.TenantID == tenantID {
+	rows, err := r.db.Query(`
+SELECT id, tenant_id, region_id, product_id, currency, amount_cents FROM price_book_entries
+WHERE tenant_id = $1 ORDER BY created_at DESC
+`, tenantID)
+	if err != nil {
+		return []PriceBookEntry{}
+	}
+	defer rows.Close()
+	out := []PriceBookEntry{}
+	for rows.Next() {
+		var e PriceBookEntry
+		if err := rows.Scan(&e.ID, &e.TenantID, &e.RegionID, &e.ProductID, &e.Currency, &e.AmountCents); err == nil {
 			out = append(out, e)
 		}
 	}

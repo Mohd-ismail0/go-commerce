@@ -5,15 +5,28 @@ on:
   pull_request:
 
 jobs:
-  build-test:
+  quality:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ["1.25.x"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: ${{ matrix.go-version }}
+      - name: Install tooling
+        run: |
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.27.0
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.7
       - name: Verify sqlc generated code is up to date
         run: make sqlc-check
+      - name: Validate OpenAPI contract
+        run: make openapi-check
+      - name: Vet
+        run: make vet
+      - name: Lint
+        run: make lint
       - name: Test
         run: make test
       - name: Build

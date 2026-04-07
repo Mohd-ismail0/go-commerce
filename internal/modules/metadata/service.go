@@ -1,0 +1,15 @@
+package metadata
+
+import "context"
+
+type Service struct {
+	repo *Repository
+}
+
+func NewService(repo *Repository) *Service {
+	return &Service{repo: repo}
+}
+
+func (s *Service) Save(_ context.Context, item Entry) Entry {
+	return s.repo.Save(item)
+}
