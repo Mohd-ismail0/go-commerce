@@ -1,11 +1,13 @@
 package orders
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"rewrite/internal/shared/events"
@@ -16,7 +18,25 @@ type orderFakeRepo struct {
 	orders map[string]Order
 }
 
-func (f *orderFakeRepo) Insert(_ context.Context, order Order) (Order, error) {
+func TestOrdersCreateRequiresIdempotencyKey(t *testing.T) {
+	repo := &orderFakeRepo{orders: map[string]Order{}}
+	h := NewHandler(NewService(repo, events.NewBus()))
+	r := chi.NewRouter()
+	r.Use(middleware.TenantRegion("public", "global"))
+	h.RegisterRoutes(r)
+
+	req := httptest.NewRequest(http.MethodPost, "/orders/", bytes.NewBufferString(`{"customer_id":"c1","currency":"USD","total_cents":1000}`))
+	req.Header.Set("X-Tenant-ID", "tenant_a")
+	req.Header.Set("X-Region-ID", "global")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", rr.Code)
+	}
+}
+
+func (f *orderFakeRepo) Insert(_ context.Context, order Order, _ string) (Order, error) {
 	if f.orders == nil {
 		f.orders = map[string]Order{}
 	}
@@ -24,15 +44,15 @@ func (f *orderFakeRepo) Insert(_ context.Context, order Order) (Order, error) {
 	return order, nil
 }
 
-func (f *orderFakeRepo) UpdateStatus(_ context.Context, tenantID, orderID, status string) (Order, error) {
-	order := f.orders[orderID]
-	order.Status = status
+func (f *orderFakeRepo) UpdateStatus(_ context.Context, tenantID string, input StatusUpdateInput) (Order, error) {
+	order := f.orders[input.ID]
+	order.Status = input.Status
 	order.TenantID = tenantID
-	f.orders[orderID] = order
+	f.orders[input.ID] = order
 	return order, nil
 }
 
-func (f *orderFakeRepo) List(_ context.Context, tenantID, _ string) ([]Order, error) {
+func (f *orderFakeRepo) List(_ context.Context, tenantID, _ string, _ *time.Time, _ int32) ([]Order, error) {
 	out := []Order{}
 	for _, order := range f.orders {
 		if order.TenantID == tenantID {
@@ -40,6 +60,12 @@ func (f *orderFakeRepo) List(_ context.Context, tenantID, _ string) ([]Order, er
 		}
 	}
 	return out, nil
+}
+
+func (f *orderFakeRepo) GetByID(_ context.Context, tenantID, orderID string) (Order, error) {
+	order := f.orders[orderID]
+	order.TenantID = tenantID
+	return order, nil
 }
 
 func TestOrdersListIsTenantScoped(t *testing.T) {

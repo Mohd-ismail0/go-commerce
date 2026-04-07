@@ -44,6 +44,8 @@ func New() (*App, error) {
 	s := server.New(
 		cfg.Port,
 		[]func(http.Handler) http.Handler{
+			middleware.Timeout(10 * time.Second),
+			middleware.BodyLimit(1 << 20),
 			middleware.TenantRegion(cfg.DefaultTenantID, cfg.DefaultRegionID),
 		},
 		catalog.NewHandler(catalog.NewService(catalog.NewRepository(conn), bus)),

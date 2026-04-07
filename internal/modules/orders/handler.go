@@ -75,6 +75,10 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		o.ID = utils.NewID("ord")
 	}
 	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "Idempotency-Key header is required"})
+		return
+	}
 	saved, err := h.svc.Create(r.Context(), o, idempotencyKey)
 	if err != nil {
 		utils.WriteError(w, err)

@@ -18,7 +18,7 @@ func NewService(repo Repository, bus *events.Bus) *Service {
 	return &Service{repo: repo, bus: bus}
 }
 
-func (s *Service) Save(ctx context.Context, product Product) (Product, error) {
+func (s *Service) Save(ctx context.Context, product Product, idempotencyKey string) (Product, error) {
 	if strings.TrimSpace(product.SKU) == "" || strings.TrimSpace(product.Name) == "" {
 		return Product{}, sharederrors.BadRequest("sku and name are required")
 	}
@@ -28,7 +28,7 @@ func (s *Service) Save(ctx context.Context, product Product) (Product, error) {
 	if product.PriceCents <= 0 {
 		return Product{}, sharederrors.BadRequest("price_cents must be positive")
 	}
-	saved, err := s.repo.Upsert(ctx, product)
+	saved, err := s.repo.Upsert(ctx, product, idempotencyKey)
 	if err != nil {
 		return Product{}, sharederrors.Conflict("product conflicts with existing sku in tenant/region")
 	}

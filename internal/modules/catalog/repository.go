@@ -9,7 +9,7 @@ import (
 )
 
 type Repository interface {
-	Upsert(ctx context.Context, product Product) (Product, error)
+	Upsert(ctx context.Context, product Product, idempotencyKey string) (Product, error)
 	List(ctx context.Context, tenantID, regionID, sku string, cursor *time.Time, limit int32) ([]Product, error)
 }
 
@@ -21,7 +21,24 @@ func NewRepository(conn *sql.DB) Repository {
 	return &PostgresRepository{queries: dbsqlc.New(conn)}
 }
 
-func (r *PostgresRepository) Upsert(ctx context.Context, product Product) (Product, error) {
+func (r *PostgresRepository) Upsert(ctx context.Context, product Product, idempotencyKey string) (Product, error) {
+	if idempotencyKey != "" {
+		resourceID, err := r.queries.GetIdempotencyResource(ctx, product.TenantID, "products.upsert", idempotencyKey)
+		if err == nil && resourceID != "" {
+			existing, getErr := r.queries.GetProductByID(ctx, product.TenantID, resourceID)
+			if getErr == nil {
+				return Product{
+					ID:         existing.ID,
+					TenantID:   existing.TenantID,
+					RegionID:   existing.RegionID,
+					SKU:        existing.Sku,
+					Name:       existing.Name,
+					Currency:   existing.Currency,
+					PriceCents: existing.PriceCents,
+				}, nil
+			}
+		}
+	}
 	row, err := r.queries.UpsertProduct(ctx, dbsqlc.UpsertProductParams{
 		ID:         product.ID,
 		TenantID:   product.TenantID,
@@ -33,6 +50,9 @@ func (r *PostgresRepository) Upsert(ctx context.Context, product Product) (Produ
 	})
 	if err != nil {
 		return Product{}, err
+	}
+	if idempotencyKey != "" {
+		_ = r.queries.SaveIdempotencyResource(ctx, product.TenantID, "products.upsert", idempotencyKey, row.ID)
 	}
 	return Product{
 		ID:         row.ID,

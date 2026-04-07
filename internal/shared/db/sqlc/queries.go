@@ -56,6 +56,16 @@ RETURNING id, tenant_id, region_id, sku, name, currency, price_cents, created_at
 	return p, err
 }
 
+func (q *Queries) GetProductByID(ctx context.Context, tenantID, productID string) (Product, error) {
+	row := q.db.QueryRowContext(ctx, `
+SELECT id, tenant_id, region_id, sku, name, currency, price_cents, created_at, updated_at
+FROM products WHERE id = $1 AND tenant_id = $2
+`, productID, tenantID)
+	var p Product
+	err := row.Scan(&p.ID, &p.TenantID, &p.RegionID, &p.Sku, &p.Name, &p.Currency, &p.PriceCents, &p.CreatedAt, &p.UpdatedAt)
+	return p, err
+}
+
 type ListProductsByTenantRegionParams struct {
 	TenantID string
 	RegionID string

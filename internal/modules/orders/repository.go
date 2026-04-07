@@ -11,6 +11,7 @@ import (
 
 type Repository interface {
 	Insert(ctx context.Context, order Order, idempotencyKey string) (Order, error)
+	GetByID(ctx context.Context, tenantID, orderID string) (Order, error)
 	UpdateStatus(ctx context.Context, tenantID string, input StatusUpdateInput) (Order, error)
 	List(ctx context.Context, tenantID, regionID string, cursor *time.Time, limit int32) ([]Order, error)
 }
@@ -69,6 +70,14 @@ func (r *PostgresRepository) UpdateStatus(ctx context.Context, tenantID string, 
 		return Order{}, err
 	}
 	_ = r.queries.InsertOrderAudit(ctx, tenantID, row.RegionID, row.ID, current.Status, row.Status)
+	return mapOrder(row), nil
+}
+
+func (r *PostgresRepository) GetByID(ctx context.Context, tenantID, orderID string) (Order, error) {
+	row, err := r.queries.GetOrderByID(ctx, tenantID, orderID)
+	if err != nil {
+		return Order{}, err
+	}
 	return mapOrder(row), nil
 }
 

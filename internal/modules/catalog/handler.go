@@ -71,10 +71,15 @@ func (h *Handler) upsert(w http.ResponseWriter, r *http.Request) {
 	}
 	p.TenantID = middleware.TenantIDFromContext(r.Context())
 	p.RegionID = middleware.RegionIDFromContext(r.Context())
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "Idempotency-Key header is required"})
+		return
+	}
 	if p.ID == "" {
 		p.ID = utils.NewID("prd")
 	}
-	saved, err := h.svc.Save(r.Context(), p)
+	saved, err := h.svc.Save(r.Context(), p, idempotencyKey)
 	if err != nil {
 		utils.WriteError(w, err)
 		return
