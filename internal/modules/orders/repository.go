@@ -12,6 +12,7 @@ import (
 
 type Repository interface {
 	Insert(ctx context.Context, order Order, idempotencyKey string) (Order, error)
+	InsertWithVoucher(ctx context.Context, order Order, idempotencyKey string, voucherCode string) (Order, error)
 	GetByID(ctx context.Context, tenantID, orderID string) (Order, error)
 	UpdateStatus(ctx context.Context, tenantID string, input StatusUpdateInput) (Order, error)
 	UpdateStatusAndRestock(ctx context.Context, tenantID string, input StatusUpdateInput) (Order, error)
@@ -63,6 +64,93 @@ func (r *PostgresRepository) Insert(ctx context.Context, order Order, idempotenc
 			IdempotencyKey: idempotencyKey,
 			ResourceID:     row.ID,
 		})
+	}
+	return mapOrder(row), nil
+}
+
+func (r *PostgresRepository) InsertWithVoucher(ctx context.Context, order Order, idempotencyKey string, voucherCode string) (Order, error) {
+	if idempotencyKey != "" {
+		resourceID, err := r.queries.GetIdempotencyResource(ctx, dbsqlc.GetIdempotencyResourceParams{
+			TenantID:       order.TenantID,
+			Scope:          "orders.create",
+			IdempotencyKey: idempotencyKey,
+		})
+		if err == nil && resourceID != "" {
+			existing, getErr := r.queries.GetOrderByID(ctx, dbsqlc.GetOrderByIDParams{
+				ID:       resourceID,
+				TenantID: order.TenantID,
+			})
+			if getErr == nil {
+				return mapOrder(existing), nil
+			}
+		}
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Order{}, err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	consume := tx.QueryRowContext(ctx, `
+UPDATE vouchers
+SET used_count = used_count + 1, updated_at = NOW()
+WHERE id = (
+  SELECT id
+  FROM vouchers
+  WHERE tenant_id = $1
+    AND region_id = $2
+    AND code = $3
+    AND currency = $4
+    AND (starts_at IS NULL OR starts_at <= NOW())
+    AND (ends_at IS NULL OR ends_at >= NOW())
+    AND (usage_limit IS NULL OR used_count < usage_limit)
+  LIMIT 1
+)
+RETURNING id
+`, order.TenantID, order.RegionID, voucherCode, order.Currency)
+	var consumedVoucherID string
+	if err := consume.Scan(&consumedVoucherID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Order{}, ErrVoucherUnavailable
+		}
+		return Order{}, err
+	}
+
+	inserted := tx.QueryRowContext(ctx, `
+INSERT INTO orders (id, tenant_id, region_id, customer_id, status, total_cents, currency, created_at, updated_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),NOW())
+RETURNING id, tenant_id, region_id, customer_id, status, total_cents, currency, created_at, updated_at
+`, order.ID, order.TenantID, order.RegionID, order.CustomerID, order.Status, order.TotalCents, order.Currency)
+	var row dbsqlc.Order
+	if err := inserted.Scan(
+		&row.ID,
+		&row.TenantID,
+		&row.RegionID,
+		&row.CustomerID,
+		&row.Status,
+		&row.TotalCents,
+		&row.Currency,
+		&row.CreatedAt,
+		&row.UpdatedAt,
+	); err != nil {
+		return Order{}, err
+	}
+
+	if idempotencyKey != "" {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO idempotency_keys (tenant_id, scope, idempotency_key, resource_id, created_at, updated_at)
+VALUES ($1,$2,$3,$4,NOW(),NOW())
+ON CONFLICT (tenant_id, scope, idempotency_key) DO UPDATE SET resource_id = EXCLUDED.resource_id, updated_at = NOW()
+`, order.TenantID, "orders.create", idempotencyKey, row.ID); err != nil {
+			return Order{}, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return Order{}, err
 	}
 	return mapOrder(row), nil
 }

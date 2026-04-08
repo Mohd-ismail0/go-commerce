@@ -9,7 +9,8 @@ import (
 )
 
 type fakeRepo struct {
-	orders map[string]Order
+	orders             map[string]Order
+	rejectVoucherOrder bool
 }
 
 func (f *fakeRepo) Insert(_ context.Context, order Order, _ string) (Order, error) {
@@ -18,6 +19,13 @@ func (f *fakeRepo) Insert(_ context.Context, order Order, _ string) (Order, erro
 	}
 	f.orders[order.ID] = order
 	return order, nil
+}
+
+func (f *fakeRepo) InsertWithVoucher(_ context.Context, order Order, _ string, _ string) (Order, error) {
+	if f.rejectVoucherOrder {
+		return Order{}, ErrVoucherUnavailable
+	}
+	return f.Insert(context.Background(), order, "")
 }
 
 func (f *fakeRepo) UpdateStatus(_ context.Context, tenantID string, input StatusUpdateInput) (Order, error) {
@@ -78,5 +86,23 @@ func TestUpdateStatusAllowsCreatedToConfirmed(t *testing.T) {
 	}
 	if updated.Status != "confirmed" {
 		t.Fatalf("expected status confirmed, got %s", updated.Status)
+	}
+}
+
+func TestCreateReturnsConflictWhenVoucherUnavailable(t *testing.T) {
+	repo := &fakeRepo{orders: map[string]Order{}, rejectVoucherOrder: true}
+	svc := NewService(repo, events.NewBus(), nil)
+	_, err := svc.Create(context.Background(), Order{
+		ID:          "ord_v",
+		TenantID:    "tenant_a",
+		RegionID:    "region_a",
+		CustomerID:  "cust_1",
+		Status:      "created",
+		TotalCents:  1000,
+		Currency:    "USD",
+		VoucherCode: "SAVE10",
+	}, "idem_1")
+	if err == nil {
+		t.Fatalf("expected conflict error when voucher unavailable")
 	}
 }

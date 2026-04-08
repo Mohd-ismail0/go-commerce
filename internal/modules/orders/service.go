@@ -44,8 +44,17 @@ func (s *Service) Create(ctx context.Context, order Order, idempotencyKey string
 		})
 		order.TotalCents = result.TotalCents
 	}
-	saved, err := s.repo.Insert(ctx, order, idempotencyKey)
+	createFn := func() (Order, error) {
+		if strings.TrimSpace(order.VoucherCode) != "" {
+			return s.repo.InsertWithVoucher(ctx, order, idempotencyKey, strings.TrimSpace(order.VoucherCode))
+		}
+		return s.repo.Insert(ctx, order, idempotencyKey)
+	}
+	saved, err := createFn()
 	if err != nil {
+		if err == ErrVoucherUnavailable {
+			return Order{}, sharederrors.Conflict(err.Error())
+		}
 		return Order{}, sharederrors.Internal("failed to persist order")
 	}
 	s.bus.Publish(ctx, events.EventOrderCreated, saved)

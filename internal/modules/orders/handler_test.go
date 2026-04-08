@@ -44,6 +44,10 @@ func (f *orderFakeRepo) Insert(_ context.Context, order Order, _ string) (Order,
 	return order, nil
 }
 
+func (f *orderFakeRepo) InsertWithVoucher(_ context.Context, order Order, _ string, _ string) (Order, error) {
+	return f.Insert(context.Background(), order, "")
+}
+
 func (f *orderFakeRepo) UpdateStatus(_ context.Context, tenantID string, input StatusUpdateInput) (Order, error) {
 	order := f.orders[input.ID]
 	order.Status = input.Status
