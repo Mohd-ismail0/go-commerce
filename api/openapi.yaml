@@ -113,6 +113,9 @@ components:
           type: integer
           format: int64
           minimum: 1
+        created_at:
+          type: string
+          format: date-time
     ProductInput:
       type: object
       required: [sku, name, currency, price_cents]
@@ -255,6 +258,9 @@ components:
         currency:
           type: string
           pattern: "^[A-Z]{3}$"
+        created_at:
+          type: string
+          format: date-time
         updated_at:
           type: string
           format: date-time
