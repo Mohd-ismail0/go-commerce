@@ -21,6 +21,14 @@ func (f *fakeRepo) UpsertLine(_ context.Context, _, _ string, line Line) (Line, 
 	return line, nil
 }
 
+func (f *fakeRepo) UpdateSessionContext(_ context.Context, _, _, checkoutID string, in Session) (Session, error) {
+	in.ID = checkoutID
+	in.Currency = "USD"
+	in.SubtotalCents = 1000
+	in.ShippingCents = 200
+	return in, nil
+}
+
 func (f *fakeRepo) Recalculate(_ context.Context, _, _, checkoutID string) (Session, error) {
 	return Session{ID: checkoutID, Currency: "USD", SubtotalCents: 1000, ShippingCents: 200, TotalCents: 1200}, nil
 }
@@ -83,5 +91,19 @@ func TestCompletePublishesOrderCreatedAndReturnsOrderID(t *testing.T) {
 	case <-done:
 	case <-time.After(500 * time.Millisecond):
 		t.Fatalf("expected order.created event to be published")
+	}
+}
+
+func TestUpdateSessionContextRecalculatesTotals(t *testing.T) {
+	repo := &fakeRepo{}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	updated, err := svc.UpdateSessionContext(context.Background(), "tenant_a", "us", "chk_1", Session{
+		VoucherCode: "SAVE10",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if updated.TaxCents == 0 || updated.TotalCents == 0 {
+		t.Fatalf("expected recalculated totals, got %+v", updated)
 	}
 }

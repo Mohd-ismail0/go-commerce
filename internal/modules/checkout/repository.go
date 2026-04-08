@@ -18,6 +18,7 @@ var ErrVoucherUnavailable = errors.New("voucher is unavailable")
 
 type Repository interface {
 	CreateSession(ctx context.Context, in Session) (Session, error)
+	UpdateSessionContext(ctx context.Context, tenantID, regionID, checkoutID string, in Session) (Session, error)
 	UpsertLine(ctx context.Context, tenantID, regionID string, line Line) (Line, error)
 	Recalculate(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error)
 	UpdatePricing(ctx context.Context, tenantID, regionID, checkoutID string, taxCents, totalCents int64) (Session, error)
@@ -66,6 +67,25 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),$7,$8,$9,NOW(),NOW())
 RETURNING id, checkout_id, COALESCE(product_id,''), COALESCE(variant_id,''), quantity, unit_price_cents, currency
 `, line.ID, tenantID, regionID, line.CheckoutID, line.ProductID, line.VariantID, line.Quantity, line.UnitPriceCents, line.Currency)
 	return scanLine(row)
+}
+
+func (r *PostgresRepository) UpdateSessionContext(ctx context.Context, tenantID, regionID, checkoutID string, in Session) (Session, error) {
+	res, err := r.db.ExecContext(ctx, `
+UPDATE checkout_sessions
+SET voucher_code = NULLIF($4,''),
+    promotion_id = NULLIF($5,''),
+    tax_class_id = NULLIF($6,''),
+    country_code = NULLIF($7,''),
+    updated_at = NOW()
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+`, checkoutID, tenantID, regionID, in.VoucherCode, in.PromotionID, in.TaxClassID, in.CountryCode)
+	if err != nil {
+		return Session{}, err
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return Session{}, ErrSessionNotFound
+	}
+	return r.getSession(ctx, tenantID, regionID, checkoutID)
 }
 
 func (r *PostgresRepository) Recalculate(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error) {

@@ -52,6 +52,23 @@ func (s *Service) UpsertLine(ctx context.Context, tenantID, regionID string, in 
 	return line, nil
 }
 
+func (s *Service) UpdateSessionContext(ctx context.Context, tenantID, regionID, checkoutID string, in Session) (Session, error) {
+	if strings.TrimSpace(checkoutID) == "" {
+		return Session{}, sharederrors.BadRequest("checkout_id is required")
+	}
+	updated, err := s.repo.UpdateSessionContext(ctx, tenantID, regionID, checkoutID, in)
+	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			return Session{}, sharederrors.NotFound(err.Error())
+		}
+		return Session{}, sharederrors.Internal("failed to update checkout session context")
+	}
+	if s.calculator == nil {
+		return updated, nil
+	}
+	return s.Recalculate(ctx, tenantID, regionID, checkoutID)
+}
+
 func (s *Service) Recalculate(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error) {
 	session, err := s.repo.Recalculate(ctx, tenantID, regionID, checkoutID)
 	if err != nil {
