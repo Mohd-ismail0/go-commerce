@@ -192,6 +192,18 @@ updated_at = NOW()
 	return d, nil
 }
 
+func (r *Repository) FindDisputeByCase(ctx context.Context, tenantID, provider, providerCaseID string) (Dispute, error) {
+	row := r.db.QueryRowContext(ctx, `
+SELECT id, tenant_id, region_id, payment_id, provider, provider_case_id, reason, status, amount_cents, currency
+FROM payment_disputes
+WHERE tenant_id = $1 AND provider = $2 AND provider_case_id = $3
+LIMIT 1
+`, tenantID, provider, providerCaseID)
+	var d Dispute
+	err := row.Scan(&d.ID, &d.TenantID, &d.RegionID, &d.PaymentID, &d.Provider, &d.ProviderCaseID, &d.Reason, &d.Status, &d.AmountCents, &d.Currency)
+	return d, err
+}
+
 func (r *Repository) ListDisputes(ctx context.Context, tenantID, regionID string) ([]Dispute, error) {
 	rows, err := r.db.QueryContext(ctx, `
 SELECT id, tenant_id, region_id, payment_id, provider, provider_case_id, reason, status, amount_cents, currency

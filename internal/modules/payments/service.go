@@ -570,6 +570,15 @@ func (s *Service) SaveDispute(ctx context.Context, d Dispute) (Dispute, error) {
 	if d.Status == "" {
 		d.Status = "open"
 	}
+	if !isValidDisputeStatus(d.Status) {
+		return Dispute{}, sharederrors.BadRequest("invalid dispute status")
+	}
+	existing, err := s.repo.FindDisputeByCase(ctx, d.TenantID, d.Provider, d.ProviderCaseID)
+	if err == nil {
+		if !isValidDisputeTransition(existing.Status, d.Status) {
+			return Dispute{}, sharederrors.Conflict("invalid dispute status transition")
+		}
+	}
 	saved, err := s.repo.SaveDispute(ctx, d)
 	if err != nil {
 		return Dispute{}, sharederrors.Internal("failed to save dispute")
@@ -583,4 +592,28 @@ func (s *Service) ListDisputes(ctx context.Context, tenantID, regionID string) (
 		return nil, sharederrors.Internal("failed to list disputes")
 	}
 	return out, nil
+}
+
+func isValidDisputeStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "open", "under_review", "won", "lost", "reversed", "closed":
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidDisputeTransition(from, to string) bool {
+	from = strings.ToLower(strings.TrimSpace(from))
+	to = strings.ToLower(strings.TrimSpace(to))
+	switch from {
+	case "open":
+		return to == "open" || to == "under_review" || to == "won" || to == "lost" || to == "closed"
+	case "under_review":
+		return to == "under_review" || to == "won" || to == "lost" || to == "reversed" || to == "closed"
+	case "won", "lost", "reversed", "closed":
+		return to == from
+	default:
+		return false
+	}
 }

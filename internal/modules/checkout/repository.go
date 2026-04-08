@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"rewrite/internal/shared/utils"
 )
 
 var ErrSessionNotFound = errors.New("checkout session not found")
@@ -129,20 +131,22 @@ WHERE checkout_id = $1 AND tenant_id = $2 AND region_id = $3
 	}
 
 	// Wave 1 invariant: reserve stock atomically during checkout completion.
-	requiredByProduct := map[string]int64{}
+	requiredByStockItem := map[string]int64{}
 	for _, l := range collected {
-		if l.ProductID != "" {
-			requiredByProduct[l.ProductID] += l.Quantity
+		stockItemID, resolveErr := resolveStockItemID(ctx, tx, tenantID, regionID, l)
+		if resolveErr != nil {
+			return OrderCreatedPayload{}, resolveErr
 		}
+		requiredByStockItem[stockItemID] += l.Quantity
 	}
-	for productID, required := range requiredByProduct {
+	for stockItemID, required := range requiredByStockItem {
 		var available int64
 		row := tx.QueryRowContext(ctx, `
 SELECT quantity
 FROM stock_items
-WHERE tenant_id = $1 AND region_id = $2 AND product_id = $3
+WHERE tenant_id = $1 AND region_id = $2 AND id = $3
 FOR UPDATE
-`, tenantID, regionID, productID)
+`, tenantID, regionID, stockItemID)
 		if scanErr := row.Scan(&available); scanErr != nil {
 			if errors.Is(scanErr, sql.ErrNoRows) {
 				return OrderCreatedPayload{}, ErrInsufficientStock
@@ -155,8 +159,14 @@ FOR UPDATE
 		if _, err = tx.ExecContext(ctx, `
 UPDATE stock_items
 SET quantity = quantity - $4, updated_at = NOW()
-WHERE tenant_id = $1 AND region_id = $2 AND product_id = $3
-`, tenantID, regionID, productID, required); err != nil {
+WHERE tenant_id = $1 AND region_id = $2 AND id = $3
+`, tenantID, regionID, stockItemID, required); err != nil {
+			return OrderCreatedPayload{}, err
+		}
+		if _, err = tx.ExecContext(ctx, `
+INSERT INTO stock_allocations (id, tenant_id, region_id, order_id, checkout_id, stock_item_id, quantity, created_at, updated_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),NOW())
+`, utils.NewID("alc"), tenantID, regionID, orderID, checkoutID, stockItemID, required); err != nil {
 			return OrderCreatedPayload{}, err
 		}
 	}
@@ -194,6 +204,33 @@ WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 		Currency:   session.Currency,
 		CheckoutID: session.ID,
 	}, nil
+}
+
+func resolveStockItemID(ctx context.Context, tx *sql.Tx, tenantID, regionID string, line Line) (string, error) {
+	var stockItemID string
+	if line.VariantID != "" {
+		row := tx.QueryRowContext(ctx, `
+SELECT id
+FROM stock_items
+WHERE tenant_id = $1 AND region_id = $2 AND variant_id = $3
+LIMIT 1
+`, tenantID, regionID, line.VariantID)
+		if err := row.Scan(&stockItemID); err == nil {
+			return stockItemID, nil
+		}
+	}
+	if line.ProductID != "" {
+		row := tx.QueryRowContext(ctx, `
+SELECT id
+FROM stock_items
+WHERE tenant_id = $1 AND region_id = $2 AND product_id = $3 AND (variant_id IS NULL OR variant_id = '')
+LIMIT 1
+`, tenantID, regionID, line.ProductID)
+		if err := row.Scan(&stockItemID); err == nil {
+			return stockItemID, nil
+		}
+	}
+	return "", ErrInsufficientStock
 }
 
 func (r *PostgresRepository) sessionExists(ctx context.Context, tenantID, regionID, checkoutID string) bool {
