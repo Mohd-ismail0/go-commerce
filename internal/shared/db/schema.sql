@@ -165,6 +165,19 @@ CREATE TABLE IF NOT EXISTS promotions (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS translations (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  region_id TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  language_code TEXT NOT NULL,
+  fields JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (tenant_id, region_id, entity_type, entity_id, language_code)
+);
+
 CREATE TABLE IF NOT EXISTS webhook_endpoints (
   id BIGSERIAL PRIMARY KEY,
   tenant_id TEXT NOT NULL,
@@ -190,6 +203,9 @@ ON products (tenant_id, region_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS ix_orders_tenant_region_status_created_at
 ON orders (tenant_id, region_id, status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS ix_translations_lookup
+ON translations (tenant_id, region_id, entity_type, language_code, entity_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_idem_tenant_scope_key
 ON idempotency_keys (tenant_id, scope, idempotency_key);
