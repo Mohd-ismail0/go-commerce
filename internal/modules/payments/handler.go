@@ -25,6 +25,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Route("/payments", func(r chi.Router) {
 		r.Get("/", h.list)
 		r.Get("/reconcile", h.reconcile)
+		r.Get("/reconciliation-actions", h.listReconciliationActions)
 		r.Get("/disputes", h.listDisputes)
 		r.Post("/disputes", h.saveDispute)
 		r.Post("/", h.save)
@@ -35,6 +36,15 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Post("/{id}/void", h.void)
 	})
 	r.Post("/webhooks/payments/{tenant_id}/{provider}", h.webhook)
+}
+
+func (h *Handler) listReconciliationActions(w http.ResponseWriter, r *http.Request) {
+	items, err := h.svc.ListReconciliationActions(r.Context(), middleware.TenantIDFromContext(r.Context()), middleware.RegionIDFromContext(r.Context()))
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
 func (h *Handler) listDisputes(w http.ResponseWriter, r *http.Request) {

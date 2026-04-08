@@ -1233,6 +1233,18 @@ paths:
       responses:
         "201":
           description: Dispute saved
+  /payments/reconciliation-actions:
+    get:
+      summary: List reconciliation remediation actions
+      security:
+        - ApiTokenAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Reconciliation actions list
         "400":
           description: Bad request
           content:

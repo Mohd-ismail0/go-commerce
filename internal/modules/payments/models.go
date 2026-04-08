@@ -91,3 +91,14 @@ type Dispute struct {
 	AmountCents    int64  `json:"amount_cents"`
 	Currency       string `json:"currency"`
 }
+
+type ReconciliationAction struct {
+	ID         string `json:"id"`
+	TenantID   string `json:"tenant_id"`
+	RegionID   string `json:"region_id"`
+	PaymentID  string `json:"payment_id"`
+	Issue      string `json:"issue"`
+	ActionType string `json:"action_type"`
+	Status     string `json:"status"`
+	Note       string `json:"note"`
+}

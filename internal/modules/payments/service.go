@@ -594,6 +594,33 @@ func (s *Service) ListDisputes(ctx context.Context, tenantID, regionID string) (
 	return out, nil
 }
 
+func (s *Service) ListReconciliationActions(ctx context.Context, tenantID, regionID string) ([]ReconciliationAction, error) {
+	out, err := s.repo.ListReconciliationActions(ctx, tenantID, regionID)
+	if err != nil {
+		return nil, sharederrors.Internal("failed to list reconciliation actions")
+	}
+	return out, nil
+}
+
+func (s *Service) UpsertReconciliationAction(ctx context.Context, tenantID, regionID string, item ReconciliationItem) error {
+	if _, err := s.repo.FindOpenReconciliationAction(ctx, tenantID, regionID, item.PaymentID, item.Issue); err == nil {
+		return nil
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	_, err := s.repo.SaveReconciliationAction(ctx, ReconciliationAction{
+		ID:         utils.NewID("pra"),
+		TenantID:   tenantID,
+		RegionID:   regionID,
+		PaymentID:  item.PaymentID,
+		Issue:      item.Issue,
+		ActionType: "investigate",
+		Status:     "open",
+		Note:       "Auto-created by reconciliation worker",
+	})
+	return err
+}
+
 func isValidDisputeStatus(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "open", "under_review", "won", "lost", "reversed", "closed":

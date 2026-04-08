@@ -210,9 +210,12 @@ func resolveStockItemID(ctx context.Context, tx *sql.Tx, tenantID, regionID stri
 	var stockItemID string
 	if line.VariantID != "" {
 		row := tx.QueryRowContext(ctx, `
-SELECT id
-FROM stock_items
-WHERE tenant_id = $1 AND region_id = $2 AND variant_id = $3
+SELECT s.id
+FROM stock_items s
+LEFT JOIN warehouses w ON w.id = s.warehouse_id AND w.tenant_id = s.tenant_id AND w.region_id = s.region_id
+WHERE s.tenant_id = $1 AND s.region_id = $2 AND s.variant_id = $3
+  AND (s.warehouse_id IS NULL OR COALESCE(w.is_active, FALSE) = TRUE)
+ORDER BY s.quantity DESC, s.updated_at ASC
 LIMIT 1
 `, tenantID, regionID, line.VariantID)
 		if err := row.Scan(&stockItemID); err == nil {
@@ -221,9 +224,12 @@ LIMIT 1
 	}
 	if line.ProductID != "" {
 		row := tx.QueryRowContext(ctx, `
-SELECT id
-FROM stock_items
-WHERE tenant_id = $1 AND region_id = $2 AND product_id = $3 AND (variant_id IS NULL OR variant_id = '')
+SELECT s.id
+FROM stock_items s
+LEFT JOIN warehouses w ON w.id = s.warehouse_id AND w.tenant_id = s.tenant_id AND w.region_id = s.region_id
+WHERE s.tenant_id = $1 AND s.region_id = $2 AND s.product_id = $3 AND (s.variant_id IS NULL OR s.variant_id = '')
+  AND (s.warehouse_id IS NULL OR COALESCE(w.is_active, FALSE) = TRUE)
+ORDER BY s.quantity DESC, s.updated_at ASC
 LIMIT 1
 `, tenantID, regionID, line.ProductID)
 		if err := row.Scan(&stockItemID); err == nil {

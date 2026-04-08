@@ -204,6 +204,51 @@ LIMIT 1
 	return d, err
 }
 
+func (r *Repository) FindOpenReconciliationAction(ctx context.Context, tenantID, regionID, paymentID, issue string) (ReconciliationAction, error) {
+	row := r.db.QueryRowContext(ctx, `
+SELECT id, tenant_id, region_id, payment_id, issue, action_type, status, note
+FROM payment_reconciliation_actions
+WHERE tenant_id = $1 AND region_id = $2 AND payment_id = $3 AND issue = $4 AND status = 'open'
+LIMIT 1
+`, tenantID, regionID, paymentID, issue)
+	var a ReconciliationAction
+	err := row.Scan(&a.ID, &a.TenantID, &a.RegionID, &a.PaymentID, &a.Issue, &a.ActionType, &a.Status, &a.Note)
+	return a, err
+}
+
+func (r *Repository) SaveReconciliationAction(ctx context.Context, a ReconciliationAction) (ReconciliationAction, error) {
+	_, err := r.db.ExecContext(ctx, `
+INSERT INTO payment_reconciliation_actions (id, tenant_id, region_id, payment_id, issue, action_type, status, note, created_at, updated_at, resolved_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW(),NOW(),NULL)
+`, a.ID, a.TenantID, a.RegionID, a.PaymentID, a.Issue, a.ActionType, a.Status, a.Note)
+	if err != nil {
+		return ReconciliationAction{}, err
+	}
+	return a, nil
+}
+
+func (r *Repository) ListReconciliationActions(ctx context.Context, tenantID, regionID string) ([]ReconciliationAction, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT id, tenant_id, region_id, payment_id, issue, action_type, status, note
+FROM payment_reconciliation_actions
+WHERE tenant_id = $1 AND region_id = $2
+ORDER BY created_at DESC
+`, tenantID, regionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ReconciliationAction{}
+	for rows.Next() {
+		var a ReconciliationAction
+		if err := rows.Scan(&a.ID, &a.TenantID, &a.RegionID, &a.PaymentID, &a.Issue, &a.ActionType, &a.Status, &a.Note); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 func (r *Repository) ListDisputes(ctx context.Context, tenantID, regionID string) ([]Dispute, error) {
 	rows, err := r.db.QueryContext(ctx, `
 SELECT id, tenant_id, region_id, payment_id, provider, provider_case_id, reason, status, amount_cents, currency

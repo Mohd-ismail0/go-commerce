@@ -34,6 +34,9 @@ func StartReconciliationWorker(ctx context.Context, svc *Service, bus *events.Bu
 				if err != nil || len(report.Items) == 0 {
 					continue
 				}
+				for _, item := range report.Items {
+					_ = svc.UpsertReconciliationAction(ctx, tenantID, regionID, item)
+				}
 				bus.Publish(ctx, EventPaymentReconciliationIssue, ReconciliationEvent{
 					TenantID: tenantID,
 					RegionID: regionID,
