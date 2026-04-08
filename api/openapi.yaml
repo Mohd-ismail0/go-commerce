@@ -426,6 +426,27 @@ components:
         endpoint_url: { type: string }
         secret: { type: string }
         is_active: { type: boolean }
+    App:
+      type: object
+      required: [id, tenant_id, region_id, name, is_active]
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        region_id: { type: string }
+        name: { type: string }
+        is_active: { type: boolean }
+        auth_token: { type: string }
+        updated_at:
+          type: string
+          format: date-time
+    AppInput:
+      type: object
+      required: [name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        is_active: { type: boolean }
+        auth_token: { type: string }
     Customer:
       type: object
       properties:
@@ -859,6 +880,87 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "403":
           description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /apps:
+    get:
+      operationId: get_apps
+      summary: List apps for tenant/region
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: query
+          name: active
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Apps list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ItemsResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/App"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: post_apps
+      summary: Create app
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppInput"
+      responses:
+        "201":
+          description: App saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/App"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: patch_apps
+      summary: Update app
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppInput"
+      responses:
+        "201":
+          description: App saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/App"
+        "400":
+          description: Bad request
           content:
             application/json:
               schema:

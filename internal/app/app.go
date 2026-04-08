@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"rewrite/internal/config"
+	"rewrite/internal/modules/apps"
 	"rewrite/internal/modules/brands"
 	"rewrite/internal/modules/catalog"
 	"rewrite/internal/modules/checkout"
@@ -109,6 +110,7 @@ func New(ctx context.Context) (*App, error) {
 		brands.NewHandler(brands.NewService(brands.NewRepository(conn))),
 		payments.NewHandler(paymentSvc, cfg.WebhookPaymentSecret, cfg.AppEnv),
 		shipping.NewHandler(shipping.NewService(shipping.NewRepository(conn))),
+		apps.NewHandler(apps.NewService(apps.NewRepository(conn))),
 		webhooks.NewHandler(webhooks.NewService(webhooks.NewRepository(conn))),
 		identity.NewHandler(identity.NewService(identity.NewRepository(conn), cfg.AuthJWTSecret, cfg.AuthJWTKeyset, cfg.AuthJWTTTLMinutes, cfg.AuthRefreshTTLMinutes)),
 		localization.NewHandler(localization.NewService(localization.NewRepository(conn))),

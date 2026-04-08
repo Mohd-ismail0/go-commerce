@@ -207,6 +207,17 @@ CREATE TABLE IF NOT EXISTS translations (
   UNIQUE (tenant_id, region_id, entity_type, entity_id, language_code)
 );
 
+CREATE TABLE IF NOT EXISTS apps (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  region_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  auth_token TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS webhook_endpoints (
   id BIGSERIAL PRIMARY KEY,
   tenant_id TEXT NOT NULL,
