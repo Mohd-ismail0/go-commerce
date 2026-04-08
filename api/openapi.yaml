@@ -482,7 +482,7 @@ paths:
                 $ref: "#/components/schemas/Order"
     patch:
       summary: Update order status
-      description: Allowed transitions: created->confirmed/cancelled, confirmed->completed/cancelled.
+      description: "Allowed transitions: created->confirmed/cancelled, confirmed->completed/cancelled."
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
