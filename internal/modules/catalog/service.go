@@ -29,6 +29,15 @@ func (s *Service) Save(ctx context.Context, product Product, idempotencyKey stri
 	if product.PriceCents <= 0 {
 		return Product{}, sharederrors.BadRequest("price_cents must be positive")
 	}
+	if strings.TrimSpace(product.Slug) != "" {
+		unique, err := s.repo.IsProductSlugAvailable(ctx, product.TenantID, product.RegionID, strings.TrimSpace(product.Slug), product.ID)
+		if err != nil {
+			return Product{}, sharederrors.Internal("failed to validate product slug")
+		}
+		if !unique {
+			return Product{}, sharederrors.Conflict("product conflicts with existing slug in tenant/region")
+		}
+	}
 	saved, err := s.repo.Upsert(ctx, product, idempotencyKey)
 	if err != nil {
 		return Product{}, sharederrors.Conflict("product conflicts with existing sku in tenant/region")

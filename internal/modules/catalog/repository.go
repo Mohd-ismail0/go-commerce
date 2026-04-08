@@ -13,6 +13,7 @@ import (
 type Repository interface {
 	Upsert(ctx context.Context, product Product, idempotencyKey string) (Product, error)
 	List(ctx context.Context, tenantID, regionID, sku string, cursor *time.Time, limit int32) ([]Product, error)
+	IsProductSlugAvailable(ctx context.Context, tenantID, regionID, slug, productID string) (bool, error)
 	UpsertVariant(ctx context.Context, variant ProductVariant) (ProductVariant, error)
 	ListVariants(ctx context.Context, tenantID, regionID, productID string) ([]ProductVariant, error)
 	IsSKUTenantRegionAvailable(ctx context.Context, tenantID, regionID, sku, variantID string) (bool, error)
@@ -144,6 +145,23 @@ func (r *PostgresRepository) List(ctx context.Context, tenantID, regionID, sku s
 		})
 	}
 	return out, nil
+}
+
+func (r *PostgresRepository) IsProductSlugAvailable(ctx context.Context, tenantID, regionID, slug, productID string) (bool, error) {
+	var exists bool
+	if err := r.db.QueryRowContext(ctx, `
+SELECT EXISTS(
+  SELECT 1
+  FROM products
+  WHERE tenant_id = $1
+    AND region_id = $2
+    AND slug = $3
+    AND ($4::text = '' OR id <> $4)
+)
+`, tenantID, regionID, slug, productID).Scan(&exists); err != nil {
+		return false, err
+	}
+	return !exists, nil
 }
 
 func (r *PostgresRepository) UpsertVariant(ctx context.Context, variant ProductVariant) (ProductVariant, error) {

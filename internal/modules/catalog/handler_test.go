@@ -58,6 +58,15 @@ func (r *catalogFakeRepo) List(_ context.Context, tenantID, _, _ string, _ *time
 	return out, nil
 }
 
+func (r *catalogFakeRepo) IsProductSlugAvailable(_ context.Context, tenantID, regionID, slug, productID string) (bool, error) {
+	for _, p := range r.items {
+		if p.TenantID == tenantID && p.RegionID == regionID && p.Slug == slug && p.ID != productID {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func (r *catalogFakeRepo) UpsertVariant(_ context.Context, variant ProductVariant) (ProductVariant, error) {
 	r.variants = append(r.variants, variant)
 	return variant, nil
@@ -297,5 +306,28 @@ func TestProductsListUsesStableCreatedAtCursor(t *testing.T) {
 	}
 	if body.Pagination.NextCursor != "2026-04-08T11:00:00Z" {
 		t.Fatalf("expected stable next cursor, got %q", body.Pagination.NextCursor)
+	}
+}
+
+func TestProductCreateRejectsDuplicateSlugInTenantRegion(t *testing.T) {
+	repo := &catalogFakeRepo{
+		items: []Product{
+			{ID: "p1", TenantID: "tenant_a", RegionID: "global", Slug: "basic-shirt"},
+		},
+	}
+	h := NewHandler(NewService(repo, events.NewBus()))
+	r := chi.NewRouter()
+	r.Use(middleware.TenantRegion("public", "global"))
+	h.RegisterRoutes(r)
+
+	req := httptest.NewRequest(http.MethodPost, "/products/", bytes.NewBufferString(`{"sku":"SKU-2","name":"Shirt","slug":"basic-shirt","currency":"USD","price_cents":100}`))
+	req.Header.Set("X-Tenant-ID", "tenant_a")
+	req.Header.Set("X-Region-ID", "global")
+	req.Header.Set("Idempotency-Key", "idem-product-duplicate-slug")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected status 409, got %d", rr.Code)
 	}
 }
