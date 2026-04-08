@@ -7,21 +7,24 @@ import (
 	"time"
 
 	dbsqlc "rewrite/internal/shared/db/sqlc"
+	"rewrite/internal/shared/utils"
 )
 
 type Repository interface {
 	Insert(ctx context.Context, order Order, idempotencyKey string) (Order, error)
 	GetByID(ctx context.Context, tenantID, orderID string) (Order, error)
 	UpdateStatus(ctx context.Context, tenantID string, input StatusUpdateInput) (Order, error)
+	UpdateStatusAndRestock(ctx context.Context, tenantID string, input StatusUpdateInput) (Order, error)
 	List(ctx context.Context, tenantID, regionID string, cursor *time.Time, limit int32) ([]Order, error)
 }
 
 type PostgresRepository struct {
+	db      *sql.DB
 	queries *dbsqlc.Queries
 }
 
 func NewRepository(conn *sql.DB) Repository {
-	return &PostgresRepository{queries: dbsqlc.New(conn)}
+	return &PostgresRepository{db: conn, queries: dbsqlc.New(conn)}
 }
 
 func (r *PostgresRepository) Insert(ctx context.Context, order Order, idempotencyKey string) (Order, error) {
@@ -103,6 +106,81 @@ func (r *PostgresRepository) GetByID(ctx context.Context, tenantID, orderID stri
 		return Order{}, err
 	}
 	return mapOrder(row), nil
+}
+
+func (r *PostgresRepository) UpdateStatusAndRestock(ctx context.Context, tenantID string, input StatusUpdateInput) (Order, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Order{}, err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	var previousStatus string
+	row := tx.QueryRowContext(ctx, `
+SELECT status FROM orders
+WHERE id = $1 AND tenant_id = $2
+FOR UPDATE
+`, input.ID, tenantID)
+	if err := row.Scan(&previousStatus); err != nil {
+		return Order{}, err
+	}
+
+	updated := tx.QueryRowContext(ctx, `
+UPDATE orders
+SET status = $3, updated_at = NOW()
+WHERE id = $1 AND tenant_id = $2 AND updated_at = $4
+RETURNING id, tenant_id, region_id, customer_id, status, total_cents, currency, created_at, updated_at
+`, input.ID, tenantID, input.Status, input.ExpectedUpdatedAt)
+	var mapped dbsqlc.Order
+	if err := updated.Scan(
+		&mapped.ID,
+		&mapped.TenantID,
+		&mapped.RegionID,
+		&mapped.CustomerID,
+		&mapped.Status,
+		&mapped.TotalCents,
+		&mapped.Currency,
+		&mapped.CreatedAt,
+		&mapped.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Order{}, ErrOptimisticLockFailed
+		}
+		return Order{}, err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO order_status_audit (id, tenant_id, region_id, order_id, previous_status, new_status, changed_at)
+VALUES ($1,$2,$3,$4,$5,$6,NOW())
+`, utils.NewID("osa"), tenantID, mapped.RegionID, mapped.ID, previousStatus, mapped.Status); err != nil {
+		return Order{}, err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+UPDATE stock_items s
+SET quantity = s.quantity + a.quantity, updated_at = NOW()
+FROM stock_allocations a
+WHERE a.order_id = $1
+  AND a.tenant_id = $2
+  AND s.id = a.stock_item_id
+  AND s.tenant_id = a.tenant_id
+  AND s.region_id = a.region_id
+`, input.ID, tenantID); err != nil {
+		return Order{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+DELETE FROM stock_allocations
+WHERE order_id = $1 AND tenant_id = $2
+`, input.ID, tenantID); err != nil {
+		return Order{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return Order{}, err
+	}
+	return mapOrder(mapped), nil
 }
 
 func (r *PostgresRepository) List(ctx context.Context, tenantID, regionID string, cursor *time.Time, limit int32) ([]Order, error) {

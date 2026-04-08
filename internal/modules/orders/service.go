@@ -63,7 +63,11 @@ func (s *Service) UpdateStatus(ctx context.Context, tenantID string, input Statu
 	if !isValidTransition(currentOrder.Status, input.Status) {
 		return Order{}, sharederrors.BadRequest(ErrInvalidStatusTransition.Error())
 	}
-	saved, err := s.repo.UpdateStatus(ctx, tenantID, input)
+	updateFn := s.repo.UpdateStatus
+	if input.Status == "cancelled" && currentOrder.Status != "cancelled" {
+		updateFn = s.repo.UpdateStatusAndRestock
+	}
+	saved, err := updateFn(ctx, tenantID, input)
 	if err != nil {
 		if err == ErrOptimisticLockFailed {
 			return Order{}, sharederrors.Conflict(err.Error())

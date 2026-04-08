@@ -52,6 +52,10 @@ func (f *orderFakeRepo) UpdateStatus(_ context.Context, tenantID string, input S
 	return order, nil
 }
 
+func (f *orderFakeRepo) UpdateStatusAndRestock(_ context.Context, tenantID string, input StatusUpdateInput) (Order, error) {
+	return f.UpdateStatus(context.Background(), tenantID, input)
+}
+
 func (f *orderFakeRepo) List(_ context.Context, tenantID, _ string, _ *time.Time, _ int32) ([]Order, error) {
 	out := []Order{}
 	for _, order := range f.orders {

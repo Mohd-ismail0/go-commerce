@@ -34,9 +34,10 @@ func (f *fakePromoRepo) SaveVoucher(item promotions.Voucher) promotions.Voucher 
 	return item
 }
 func (f *fakePromoRepo) ListVouchers(_ string) []promotions.Voucher { return nil }
-func (f *fakePromoRepo) TryConsumeVoucher(_, _, _, _ string, _ time.Time) (promotions.Voucher, bool) {
+func (f *fakePromoRepo) FindEligibleVoucher(_, _, _, _ string, _ time.Time) (promotions.Voucher, bool) {
 	return promotions.Voucher{}, false
 }
+func (f *fakePromoRepo) ConsumeVoucherByID(_ string) bool { return false }
 func (f *fakePromoRepo) GetPromotionByID(id, tenantID, regionID string) (promotions.Promotion, bool) {
 	if id == "promo_a" && tenantID == "tenant_a" && regionID == "region_a" {
 		return promotions.Promotion{ID: id, TenantID: tenantID, RegionID: regionID, ValueCents: 200}, true
