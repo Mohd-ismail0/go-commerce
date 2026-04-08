@@ -49,6 +49,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	tenantID := middleware.TenantIDFromContext(r.Context())
 	regionID := middleware.RegionIDFromContext(r.Context())
 	sku := strings.TrimSpace(r.URL.Query().Get("sku"))
+	languageCode := strings.TrimSpace(r.URL.Query().Get("language_code"))
 	limit := int32(20)
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil {
@@ -64,7 +65,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		}
 		cursor = &parsed
 	}
-	items, err := h.svc.List(r.Context(), tenantID, regionID, sku, cursor, limit)
+	items, err := h.svc.List(r.Context(), tenantID, regionID, sku, languageCode, cursor, limit)
 	if err != nil {
 		utils.WriteError(w, err)
 		return

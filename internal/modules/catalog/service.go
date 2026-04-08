@@ -46,11 +46,44 @@ func (s *Service) Save(ctx context.Context, product Product, idempotencyKey stri
 	return saved, nil
 }
 
-func (s *Service) List(ctx context.Context, tenantID, regionID, sku string, cursor *time.Time, limit int32) ([]Product, error) {
+func (s *Service) List(ctx context.Context, tenantID, regionID, sku, languageCode string, cursor *time.Time, limit int32) ([]Product, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
-	return s.repo.List(ctx, tenantID, regionID, sku, cursor, limit)
+	items, err := s.repo.List(ctx, tenantID, regionID, sku, cursor, limit)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(languageCode) == "" || len(items) == 0 {
+		return items, nil
+	}
+	ids := make([]string, 0, len(items))
+	for _, it := range items {
+		ids = append(ids, it.ID)
+	}
+	translations, err := s.repo.ListProductTranslations(ctx, tenantID, regionID, ids, strings.TrimSpace(languageCode))
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		fields, ok := translations[items[i].ID]
+		if !ok {
+			continue
+		}
+		if v := strings.TrimSpace(fields["name"]); v != "" {
+			items[i].Name = v
+		}
+		if v := strings.TrimSpace(fields["description"]); v != "" {
+			items[i].Description = v
+		}
+		if v := strings.TrimSpace(fields["seo_title"]); v != "" {
+			items[i].SEOTitle = v
+		}
+		if v := strings.TrimSpace(fields["seo_description"]); v != "" {
+			items[i].SEODescription = v
+		}
+	}
+	return items, nil
 }
 
 func (s *Service) SaveVariant(ctx context.Context, variant ProductVariant) (ProductVariant, error) {

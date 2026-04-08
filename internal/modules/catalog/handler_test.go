@@ -17,6 +17,7 @@ import (
 
 type catalogFakeRepo struct {
 	items              []Product
+	productTranslations map[string]map[string]map[string]string
 	variants           []ProductVariant
 	categories         []Category
 	collections        []Collection
@@ -53,6 +54,21 @@ func (r *catalogFakeRepo) List(_ context.Context, tenantID, _, _ string, _ *time
 	for _, p := range r.items {
 		if p.TenantID == tenantID {
 			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+func (r *catalogFakeRepo) ListProductTranslations(_ context.Context, _, _ string, productIDs []string, languageCode string) (map[string]map[string]string, error) {
+	out := map[string]map[string]string{}
+	if r.productTranslations == nil || languageCode == "" {
+		return out, nil
+	}
+	for _, id := range productIDs {
+		if byLang, ok := r.productTranslations[id]; ok {
+			if fields, ok := byLang[languageCode]; ok {
+				out[id] = fields
+			}
 		}
 	}
 	return out, nil
@@ -329,5 +345,41 @@ func TestProductCreateRejectsDuplicateSlugInTenantRegion(t *testing.T) {
 
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("expected status 409, got %d", rr.Code)
+	}
+}
+
+func TestProductsListAppliesLanguageTranslationOverlay(t *testing.T) {
+	repo := &catalogFakeRepo{
+		items: []Product{
+			{ID: "p1", TenantID: "tenant_a", RegionID: "global", Name: "Base Name", Description: "Base Description"},
+		},
+		productTranslations: map[string]map[string]map[string]string{
+			"p1": {
+				"fr": {
+					"name":            "Nom FR",
+					"description":     "Description FR",
+					"seo_title":       "SEO FR",
+					"seo_description": "Meta FR",
+				},
+			},
+		},
+	}
+	h := NewHandler(NewService(repo, events.NewBus()))
+	r := chi.NewRouter()
+	r.Use(middleware.TenantRegion("public", "global"))
+	h.RegisterRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/products/?language_code=fr", nil)
+	req.Header.Set("X-Tenant-ID", "tenant_a")
+	req.Header.Set("X-Region-ID", "global")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rr.Code)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "Nom FR") || !strings.Contains(body, "Description FR") || !strings.Contains(body, "SEO FR") || !strings.Contains(body, "Meta FR") {
+		t.Fatalf("expected localized values in response, got: %s", body)
 	}
 }

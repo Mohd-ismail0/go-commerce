@@ -531,6 +531,11 @@ paths:
           name: sku
           schema:
             type: string
+        - in: query
+          name: language_code
+          description: Optional locale/language code used to overlay translated product fields.
+          schema:
+            type: string
       responses:
         "200":
           description: Product list

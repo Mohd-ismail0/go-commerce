@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 type Repository interface {
 	Upsert(ctx context.Context, product Product, idempotencyKey string) (Product, error)
 	List(ctx context.Context, tenantID, regionID, sku string, cursor *time.Time, limit int32) ([]Product, error)
+	ListProductTranslations(ctx context.Context, tenantID, regionID string, productIDs []string, languageCode string) (map[string]map[string]string, error)
 	IsProductSlugAvailable(ctx context.Context, tenantID, regionID, slug, productID string) (bool, error)
 	UpsertVariant(ctx context.Context, variant ProductVariant) (ProductVariant, error)
 	ListVariants(ctx context.Context, tenantID, regionID, productID string) ([]ProductVariant, error)
@@ -24,6 +26,56 @@ type Repository interface {
 	AssignProductToCollection(ctx context.Context, tenantID, regionID, collectionID, productID string) error
 	InsertProductMedia(ctx context.Context, media ProductMedia) (ProductMedia, error)
 	ListProductMedia(ctx context.Context, tenantID, regionID, productID string) ([]ProductMedia, error)
+}
+
+func (r *PostgresRepository) ListProductTranslations(ctx context.Context, tenantID, regionID string, productIDs []string, languageCode string) (map[string]map[string]string, error) {
+	out := map[string]map[string]string{}
+	if languageCode == "" || len(productIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `
+SELECT entity_id, fields
+FROM translations
+WHERE tenant_id = $1
+  AND region_id = $2
+  AND entity_type = 'product'
+  AND language_code = $3
+`, tenantID, regionID, languageCode)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var entityID string
+		var fieldsRaw []byte
+		if err := rows.Scan(&entityID, &fieldsRaw); err != nil {
+			return nil, err
+		}
+		fields := map[string]string{}
+		var generic map[string]any
+		if err := json.Unmarshal(fieldsRaw, &generic); err == nil {
+			for k, v := range generic {
+				if s, ok := v.(string); ok {
+					fields[k] = s
+				}
+			}
+		}
+		out[entityID] = fields
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	allowed := map[string]struct{}{}
+	for _, id := range productIDs {
+		allowed[id] = struct{}{}
+	}
+	filtered := map[string]map[string]string{}
+	for id, fields := range out {
+		if _, ok := allowed[id]; ok {
+			filtered[id] = fields
+		}
+	}
+	return filtered, nil
 }
 
 type PostgresRepository struct {
