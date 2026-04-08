@@ -45,24 +45,30 @@ func PolicyAuthorization(db *sql.DB, rules []PolicyRule, opts PolicyOptions) fun
 				})
 				return
 			}
+			if strings.TrimSpace(userID) == "" {
+				utils.JSON(w, http.StatusUnauthorized, map[string]any{
+					"code":    "unauthorized",
+					"message": "missing user authentication token",
+				})
+				return
+			}
 			if hasAdminRole(roles) {
 				next.ServeHTTP(w, r.WithContext(WithUserID(r.Context(), userID)))
 				return
 			}
-			if strings.TrimSpace(userID) != "" {
-				tenantID := TenantIDFromContext(r.Context())
-				ok, err := permissions.UserHasPermission(r.Context(), db, tenantID, userID, code)
-				if err != nil {
-					utils.JSON(w, http.StatusInternalServerError, map[string]any{
-						"code":    "internal",
-						"message": "failed to evaluate permissions",
-					})
-					return
-				}
-				if ok {
-					next.ServeHTTP(w, r.WithContext(WithUserID(r.Context(), userID)))
-					return
-				}
+
+			tenantID := TenantIDFromContext(r.Context())
+			ok, err := permissions.UserHasPermission(r.Context(), db, tenantID, userID, code)
+			if err != nil {
+				utils.JSON(w, http.StatusInternalServerError, map[string]any{
+					"code":    "internal",
+					"message": "failed to evaluate permissions",
+				})
+				return
+			}
+			if ok {
+				next.ServeHTTP(w, r.WithContext(WithUserID(r.Context(), userID)))
+				return
 			}
 
 			utils.JSON(w, http.StatusForbidden, map[string]any{
@@ -74,7 +80,7 @@ func PolicyAuthorization(db *sql.DB, rules []PolicyRule, opts PolicyOptions) fun
 }
 
 func resolveIdentity(r *http.Request, opts PolicyOptions) (string, []string, error) {
-	token := strings.TrimSpace(r.Header.Get("X-User-JWT"))
+	token := UserJWTFromRequest(r)
 	if token != "" {
 		secret := strings.TrimSpace(opts.UserJWTSecret)
 		if secret == "" {
@@ -108,6 +114,23 @@ func resolveIdentity(r *http.Request, opts PolicyOptions) (string, []string, err
 		}
 	}
 	return "", nil, nil
+}
+
+// UserJWTFromRequest supports both legacy X-User-JWT and standard Authorization Bearer.
+func UserJWTFromRequest(r *http.Request) string {
+	token := strings.TrimSpace(r.Header.Get("X-User-JWT"))
+	if token != "" {
+		return token
+	}
+	auth := strings.TrimSpace(r.Header.Get("Authorization"))
+	if auth == "" {
+		return ""
+	}
+	parts := strings.SplitN(auth, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
 }
 
 func hasAdminRole(roles []string) bool {

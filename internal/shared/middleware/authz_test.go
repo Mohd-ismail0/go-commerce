@@ -49,3 +49,29 @@ func TestResolveIdentityLegacyBypassDisabled(t *testing.T) {
 		t.Fatalf("expected no legacy identity when disabled")
 	}
 }
+
+func TestUserJWTFromRequestSupportsBearer(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/payments", nil)
+	req.Header.Set("Authorization", "Bearer token_abc")
+	token := UserJWTFromRequest(req)
+	if token != "token_abc" {
+		t.Fatalf("expected bearer token, got %q", token)
+	}
+}
+
+func TestResolveIdentityAcceptsBearerToken(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/payments", nil)
+	req = req.WithContext(WithTenantID(req.Context(), "tenant_a"))
+	token := buildJWT(t, "secret", map[string]any{
+		"sub":       "u1",
+		"tenant_id": "tenant_a",
+	})
+	req.Header.Set("Authorization", "Bearer "+token)
+	userID, _, err := resolveIdentity(req, PolicyOptions{UserJWTSecret: "secret"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if userID != "u1" {
+		t.Fatalf("expected user id u1, got %q", userID)
+	}
+}

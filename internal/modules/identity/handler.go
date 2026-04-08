@@ -102,7 +102,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) sessions(w http.ResponseWriter, r *http.Request) {
-	items, err := h.svc.ListSessions(r.Context(), middleware.TenantIDFromContext(r.Context()), r.Header.Get("X-User-JWT"))
+	items, err := h.svc.ListSessions(r.Context(), middleware.TenantIDFromContext(r.Context()), middleware.UserJWTFromRequest(r))
 	if err != nil {
 		utils.WriteError(w, err)
 		return
@@ -112,7 +112,7 @@ func (h *Handler) sessions(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) revokeSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
-	if err := h.svc.RevokeSession(r.Context(), middleware.TenantIDFromContext(r.Context()), r.Header.Get("X-User-JWT"), sessionID); err != nil {
+	if err := h.svc.RevokeSession(r.Context(), middleware.TenantIDFromContext(r.Context()), middleware.UserJWTFromRequest(r), sessionID); err != nil {
 		utils.WriteError(w, err)
 		return
 	}
@@ -125,7 +125,7 @@ func (h *Handler) revokeOthers(w http.ResponseWriter, r *http.Request) {
 		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
 		return
 	}
-	if err := h.svc.RevokeOtherSessions(r.Context(), middleware.TenantIDFromContext(r.Context()), r.Header.Get("X-User-JWT"), in.RefreshToken); err != nil {
+	if err := h.svc.RevokeOtherSessions(r.Context(), middleware.TenantIDFromContext(r.Context()), middleware.UserJWTFromRequest(r), in.RefreshToken); err != nil {
 		utils.WriteError(w, err)
 		return
 	}
