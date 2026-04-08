@@ -87,7 +87,9 @@ func (r *PostgresRepository) Complete(ctx context.Context, tenantID, regionID, c
 	if err != nil {
 		return OrderCreatedPayload{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 
 	var session Session
 	row := tx.QueryRowContext(ctx, `

@@ -27,7 +27,9 @@ func (r *PostgresRepository) Create(ctx context.Context, in Fulfillment) (Fulfil
 	if err != nil {
 		return Fulfillment{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 
 	var found int
 	if err = tx.QueryRowContext(ctx, `

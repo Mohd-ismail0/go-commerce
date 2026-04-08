@@ -7,9 +7,8 @@ import (
 )
 
 type fakeRepo struct {
-	used     int64
-	limit    int64
-	vouchers map[string]Voucher
+	used  int64
+	limit int64
 }
 
 func (f *fakeRepo) Save(item Promotion) Promotion { return item }
