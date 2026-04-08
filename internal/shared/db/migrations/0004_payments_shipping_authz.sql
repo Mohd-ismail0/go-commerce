@@ -1,6 +1,8 @@
 ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS provider_event_id TEXT;
 
+ALTER TABLE shipping_zones ALTER COLUMN countries DROP DEFAULT;
 ALTER TABLE shipping_zones ALTER COLUMN countries TYPE JSONB USING to_jsonb(countries);
+ALTER TABLE shipping_zones ALTER COLUMN countries SET DEFAULT '[]'::jsonb;
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_payment_tx_tenant_provider_event
 ON payment_transactions (tenant_id, provider_event_id)
