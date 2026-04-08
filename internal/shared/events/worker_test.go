@@ -11,6 +11,7 @@ type fakeWorkerStore struct {
 	subs       []WebhookSubscription
 	recorded   []DeliveryAttempt
 	doneIDs    []string
+	failedIDs  []string
 	retryCalls []struct {
 		id        string
 		attempts  int64
@@ -33,6 +34,11 @@ func (f *fakeWorkerStore) MarkRetry(ctx context.Context, id string, attempts int
 		attempts  int64
 		nextRetry time.Time
 	}{id: id, attempts: attempts, nextRetry: nextRetryAt})
+	return nil
+}
+
+func (f *fakeWorkerStore) MarkFailed(ctx context.Context, id string) error {
+	f.failedIDs = append(f.failedIDs, id)
 	return nil
 }
 
@@ -62,7 +68,7 @@ func TestWorkerMarksDoneOnlyOnSuccessfulDeliveries(t *testing.T) {
 	deliverer := &fakeDeliverer{
 		results: []WebhookDeliveryResult{{SubscriptionID: "sub1", StatusCode: 200, ResponseBody: "ok"}},
 	}
-	worker := &Worker{store: store, dispatcher: deliverer, now: func() time.Time { return base }}
+	worker := &Worker{store: store, dispatcher: deliverer, now: func() time.Time { return base }, maxRetries: 8}
 
 	worker.tick(context.Background())
 
@@ -86,7 +92,7 @@ func TestWorkerRetriesAndRecordsAttemptOnFailure(t *testing.T) {
 	deliverer := &fakeDeliverer{
 		results: []WebhookDeliveryResult{{SubscriptionID: "sub2", StatusCode: 500, ResponseBody: "boom"}},
 	}
-	worker := &Worker{store: store, dispatcher: deliverer, now: func() time.Time { return base }}
+	worker := &Worker{store: store, dispatcher: deliverer, now: func() time.Time { return base }, maxRetries: 8}
 
 	worker.tick(context.Background())
 

@@ -17,6 +17,14 @@ type Order struct {
 	UpdatedAt   string `json:"updated_at,omitempty"`
 }
 
+func (o Order) GetTenantID() string {
+	return o.TenantID
+}
+
+func (o Order) GetRegionID() string {
+	return o.RegionID
+}
+
 type StatusUpdateInput struct {
 	ID                string
 	Status            string

@@ -10,6 +10,14 @@ type Product struct {
 	PriceCents int64  `json:"price_cents"`
 }
 
+func (p Product) GetTenantID() string {
+	return p.TenantID
+}
+
+func (p Product) GetRegionID() string {
+	return p.RegionID
+}
+
 type ProductVariant struct {
 	ID         string `json:"id"`
 	TenantID   string `json:"tenant_id"`

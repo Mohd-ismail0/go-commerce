@@ -2,7 +2,10 @@ package events
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -41,9 +44,19 @@ type OutboxEvent struct {
 
 func (s *OutboxStore) DequeuePending(ctx context.Context, limit int) ([]OutboxEvent, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, tenant_id, region_id, event_name, payload::text, attempts
-FROM event_outbox WHERE status = 'pending' AND available_at <= NOW()
-ORDER BY created_at ASC LIMIT $1
+WITH picked AS (
+  SELECT id
+  FROM event_outbox
+  WHERE status = 'pending' AND available_at <= NOW()
+  ORDER BY created_at ASC
+  LIMIT $1
+  FOR UPDATE SKIP LOCKED
+)
+UPDATE event_outbox e
+SET status='processing', updated_at=NOW()
+FROM picked
+WHERE e.id = picked.id
+RETURNING e.id, e.tenant_id, e.region_id, e.event_name, e.payload::text, e.attempts
 `, limit)
 	if err != nil {
 		return nil, err
@@ -72,6 +85,11 @@ func (s *OutboxStore) MarkRetry(ctx context.Context, id string, attempts int64, 
 	return err
 }
 
+func (s *OutboxStore) MarkFailed(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE event_outbox SET status='dead', updated_at=NOW() WHERE id=$1`, id)
+	return err
+}
+
 type DeliveryAttempt struct {
 	OutboxID       string
 	TenantID       string
@@ -87,11 +105,12 @@ type WebhookSubscription struct {
 	ID          string
 	EventName   string
 	EndpointURL string
+	Secret      string
 }
 
 func (s *OutboxStore) ListActiveWebhookSubscriptions(ctx context.Context, tenantID, regionID, eventName string) ([]WebhookSubscription, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, event_name, endpoint_url
+SELECT id, event_name, endpoint_url, COALESCE(secret,'')
 FROM webhook_subscriptions
 WHERE tenant_id=$1 AND region_id=$2 AND event_name=$3 AND is_active=TRUE
 `, tenantID, regionID, eventName)
@@ -104,12 +123,21 @@ WHERE tenant_id=$1 AND region_id=$2 AND event_name=$3 AND is_active=TRUE
 	out := []WebhookSubscription{}
 	for rows.Next() {
 		var sub WebhookSubscription
-		if err := rows.Scan(&sub.ID, &sub.EventName, &sub.EndpointURL); err != nil {
+		if err := rows.Scan(&sub.ID, &sub.EventName, &sub.EndpointURL, &sub.Secret); err != nil {
 			return nil, err
 		}
 		out = append(out, sub)
 	}
 	return out, rows.Err()
+}
+
+func SignWebhookPayload(secret string, payload []byte) string {
+	if secret == "" {
+		return ""
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write(payload)
+	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
 
 func (s *OutboxStore) RecordDeliveryAttempt(ctx context.Context, item DeliveryAttempt) error {

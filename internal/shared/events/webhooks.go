@@ -75,6 +75,7 @@ func (d *WebhookDispatcher) dispatch(ctx context.Context, event string, payload 
 type WebhookDeliveryInput struct {
 	SubscriptionID string
 	URL            string
+	Secret         string
 }
 
 type WebhookDeliveryResult struct {
@@ -105,6 +106,10 @@ func (d *WebhookDispatcher) Deliver(ctx context.Context, event string, payload a
 			continue
 		}
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Webhook-Event", event)
+		if signature := SignWebhookPayload(target.Secret, body); signature != "" {
+			req.Header.Set("X-Webhook-Signature", signature)
+		}
 		resp, doErr := d.client.Do(req)
 		if doErr != nil {
 			result.Err = doErr

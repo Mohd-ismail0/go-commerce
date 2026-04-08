@@ -159,23 +159,35 @@ WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 	return p, true
 }
 
-func (r *Repository) TryConsumeVoucher(tenantID, regionID, code, currency string, at time.Time) (Voucher, bool) {
+func (r *Repository) FindEligibleVoucher(tenantID, regionID, code, currency string, at time.Time) (Voucher, bool) {
+	row := r.db.QueryRow(`
+SELECT id, tenant_id, region_id, code, discount_type, value_cents, currency, usage_limit, used_count, starts_at, ends_at
+FROM vouchers
+WHERE tenant_id = $1
+  AND region_id = $2
+  AND code = $3
+  AND currency = $4
+  AND (starts_at IS NULL OR starts_at <= $5)
+  AND (ends_at IS NULL OR ends_at >= $5)
+  AND (usage_limit IS NULL OR used_count < usage_limit)
+LIMIT 1
+`, tenantID, regionID, code, currency, at.UTC())
+	return scanVoucher(row)
+}
+
+func (r *Repository) ConsumeVoucherByID(voucherID string) bool {
 	row := r.db.QueryRow(`
 UPDATE vouchers
 SET used_count = used_count + 1, updated_at = NOW()
-WHERE id = (
-  SELECT id FROM vouchers
-  WHERE tenant_id = $1
-    AND region_id = $2
-    AND code = $3
-    AND currency = $4
-    AND (starts_at IS NULL OR starts_at <= $5)
-    AND (ends_at IS NULL OR ends_at >= $5)
-    AND (usage_limit IS NULL OR used_count < usage_limit)
-  LIMIT 1
-)
+WHERE id = $1
+  AND (usage_limit IS NULL OR used_count < usage_limit)
 RETURNING id, tenant_id, region_id, code, discount_type, value_cents, currency, usage_limit, used_count, starts_at, ends_at
-`, tenantID, regionID, code, currency, at.UTC())
+`, voucherID)
+	_, ok := scanVoucher(row)
+	return ok
+}
+
+func scanVoucher(row *sql.Row) (Voucher, bool) {
 	var v Voucher
 	var startsAt sql.NullTime
 	var endsAt sql.NullTime

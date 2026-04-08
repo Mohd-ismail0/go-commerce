@@ -17,7 +17,8 @@ type serviceRepository interface {
 	ListRules(tenantID string) []PromotionRule
 	SaveVoucher(item Voucher) Voucher
 	ListVouchers(tenantID string) []Voucher
-	TryConsumeVoucher(tenantID, regionID, code, currency string, at time.Time) (Voucher, bool)
+	FindEligibleVoucher(tenantID, regionID, code, currency string, at time.Time) (Voucher, bool)
+	ConsumeVoucherByID(voucherID string) bool
 	GetPromotionByID(id, tenantID, regionID string) (Promotion, bool)
 }
 
@@ -54,13 +55,9 @@ func (s *Service) ResolveDiscount(_ context.Context, input EligibilityInput) int
 		return 0
 	}
 	if strings.TrimSpace(input.VoucherCode) != "" {
-		at := time.Now().UTC()
-		if parsed, err := parseRFC3339OrZero(input.ReferenceTime); err == nil && !parsed.IsZero() {
-			at = parsed.UTC()
-		}
-		voucher, ok := s.repo.TryConsumeVoucher(input.TenantID, input.RegionID, input.VoucherCode, input.Currency, at)
+		voucher, ok := s.resolveEligibleVoucher(input)
 		if ok {
-			return clampDiscount(input.BaseAmount, voucher.ValueCents)
+			return voucherDiscount(input.BaseAmount, voucher.DiscountType, voucher.ValueCents)
 		}
 	}
 	if strings.TrimSpace(input.PromotionID) != "" {
@@ -71,6 +68,22 @@ func (s *Service) ResolveDiscount(_ context.Context, input EligibilityInput) int
 	return 0
 }
 
+func (s *Service) ConsumeVoucher(_ context.Context, input EligibilityInput) bool {
+	voucher, ok := s.resolveEligibleVoucher(input)
+	if !ok {
+		return false
+	}
+	return s.repo.ConsumeVoucherByID(voucher.ID)
+}
+
+func (s *Service) resolveEligibleVoucher(input EligibilityInput) (Voucher, bool) {
+	at := time.Now().UTC()
+	if parsed, err := parseRFC3339OrZero(input.ReferenceTime); err == nil && !parsed.IsZero() {
+		at = parsed.UTC()
+	}
+	return s.repo.FindEligibleVoucher(input.TenantID, input.RegionID, input.VoucherCode, input.Currency, at)
+}
+
 func clampDiscount(base, discount int64) int64 {
 	if discount < 0 {
 		return 0
@@ -79,4 +92,13 @@ func clampDiscount(base, discount int64) int64 {
 		return base
 	}
 	return discount
+}
+
+func voucherDiscount(base int64, discountType string, value int64) int64 {
+	switch strings.ToLower(strings.TrimSpace(discountType)) {
+	case "percentage", "percent":
+		return clampDiscount(base, (base*value)/100)
+	default:
+		return clampDiscount(base, value)
+	}
 }

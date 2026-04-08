@@ -9,3 +9,11 @@ type StockItem struct {
 	WarehouseID string `json:"warehouse_id,omitempty"`
 	Quantity    int64  `json:"quantity"`
 }
+
+func (s StockItem) GetTenantID() string {
+	return s.TenantID
+}
+
+func (s StockItem) GetRegionID() string {
+	return s.RegionID
+}

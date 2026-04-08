@@ -10,6 +10,7 @@ type outboxWorkerStore interface {
 	DequeuePending(ctx context.Context, limit int) ([]OutboxEvent, error)
 	MarkDone(ctx context.Context, id string) error
 	MarkRetry(ctx context.Context, id string, attempts int64, nextRetryAt time.Time) error
+	MarkFailed(ctx context.Context, id string) error
 	ListActiveWebhookSubscriptions(ctx context.Context, tenantID, regionID, eventName string) ([]WebhookSubscription, error)
 	RecordDeliveryAttempt(ctx context.Context, item DeliveryAttempt) error
 }
@@ -22,6 +23,7 @@ type Worker struct {
 	store      outboxWorkerStore
 	dispatcher webhookDeliverer
 	now        func() time.Time
+	maxRetries int64
 }
 
 func NewWorker(store *OutboxStore, dispatcher *WebhookDispatcher) *Worker {
@@ -29,6 +31,7 @@ func NewWorker(store *OutboxStore, dispatcher *WebhookDispatcher) *Worker {
 		store:      store,
 		dispatcher: dispatcher,
 		now:        time.Now,
+		maxRetries: 8,
 	}
 }
 
@@ -71,6 +74,7 @@ func (w *Worker) tick(ctx context.Context) {
 			targets = append(targets, WebhookDeliveryInput{
 				SubscriptionID: sub.ID,
 				URL:            sub.EndpointURL,
+				Secret:         sub.Secret,
 			})
 		}
 		results := w.dispatcher.Deliver(ctx, item.EventName, map[string]any{"raw": item.Payload}, targets)
@@ -106,6 +110,10 @@ func (w *Worker) tick(ctx context.Context) {
 		}
 		if allSucceeded {
 			_ = w.store.MarkDone(ctx, item.ID)
+			continue
+		}
+		if nextAttempts >= w.maxRetries {
+			_ = w.store.MarkFailed(ctx, item.ID)
 			continue
 		}
 		_ = w.store.MarkRetry(ctx, item.ID, nextAttempts, nextRetryAt)
