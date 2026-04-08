@@ -23,16 +23,8 @@ func NewRepository(conn *sql.DB) Repository {
 }
 
 func (r *PostgresRepository) Create(ctx context.Context, in Fulfillment) (Fulfillment, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Fulfillment{}, err
-	}
-	defer func() {
-		_ = tx.Rollback()
-	}()
-
 	var found int
-	if err = tx.QueryRowContext(ctx, `
+	if err := r.db.QueryRowContext(ctx, `
 SELECT 1 FROM orders WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 `, in.OrderID, in.TenantID, in.RegionID).Scan(&found); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -41,23 +33,13 @@ SELECT 1 FROM orders WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 		return Fulfillment{}, err
 	}
 
-	row := tx.QueryRowContext(ctx, `
+	row := r.db.QueryRowContext(ctx, `
 INSERT INTO fulfillments (id, tenant_id, region_id, order_id, status, tracking_number, created_at, updated_at)
 VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),NOW(),NOW())
 RETURNING id, tenant_id, region_id, order_id, status, COALESCE(tracking_number,''), updated_at
 `, in.ID, in.TenantID, in.RegionID, in.OrderID, in.Status, in.TrackingNumber)
 	saved, err := scanFulfillment(row)
 	if err != nil {
-		return Fulfillment{}, err
-	}
-
-	if _, err = tx.ExecContext(ctx, `
-UPDATE orders SET status = 'completed', updated_at = NOW()
-WHERE id = $1 AND tenant_id = $2 AND region_id = $3
-`, in.OrderID, in.TenantID, in.RegionID); err != nil {
-		return Fulfillment{}, err
-	}
-	if err = tx.Commit(); err != nil {
 		return Fulfillment{}, err
 	}
 	return saved, nil

@@ -96,6 +96,14 @@ func (s *Service) List(ctx context.Context, tenantID, regionID string, cursor *t
 	return s.repo.List(ctx, tenantID, regionID, cursor, limit)
 }
 
+func (s *Service) GetByID(ctx context.Context, tenantID, orderID string) (Order, error) {
+	order, err := s.repo.GetByID(ctx, tenantID, orderID)
+	if err != nil {
+		return Order{}, sharederrors.Internal("failed to load order")
+	}
+	return order, nil
+}
+
 func isValidTransition(from, to string) bool {
 	switch from {
 	case "created":

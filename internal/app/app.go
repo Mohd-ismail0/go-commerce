@@ -62,6 +62,7 @@ func New(ctx context.Context) (*App, error) {
 	promotionsSvc := promotions.NewService(promotions.NewRepository(conn))
 	pricingSvc := pricing.NewService(pricing.NewRepository(conn), promotionsSvc)
 	paymentSvc := payments.NewService(payments.NewRepository(conn))
+	orderSvc := orders.NewService(orders.NewRepository(conn), bus, pricingSvc)
 	payments.StartReconciliationWorker(
 		appCtx,
 		paymentSvc,
@@ -93,8 +94,8 @@ func New(ctx context.Context) (*App, error) {
 		},
 		catalog.NewHandler(catalog.NewService(catalog.NewRepository(conn), bus)),
 		checkout.NewHandler(checkout.NewService(checkout.NewRepository(conn), bus, pricingSvc)),
-		orders.NewHandler(orders.NewService(orders.NewRepository(conn), bus, pricingSvc)),
-		fulfillments.NewHandler(fulfillments.NewService(fulfillments.NewRepository(conn))),
+		orders.NewHandler(orderSvc),
+		fulfillments.NewHandler(fulfillments.NewService(fulfillments.NewRepository(conn), orderSvc)),
 		customers.NewHandler(customers.NewService(customers.NewRepository(conn))),
 		inventory.NewHandler(inventory.NewService(inventory.NewRepository(conn), bus)),
 		pricing.NewHandler(pricingSvc),
