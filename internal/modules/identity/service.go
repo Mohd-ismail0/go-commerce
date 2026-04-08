@@ -3,9 +3,11 @@ package identity
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"time"
@@ -15,16 +17,25 @@ import (
 )
 
 type Service struct {
-	repo         *Repository
-	jwtSecret    string
-	jwtTTLMinute int
+	repo              *Repository
+	jwtSecret         string
+	jwtTTLMinute      int
+	refreshTTLMinutes int
 }
 
-func NewService(repo *Repository, jwtSecret string, jwtTTLMinute int) *Service {
+func NewService(repo *Repository, jwtSecret string, jwtTTLMinute, refreshTTLMinutes int) *Service {
 	if jwtTTLMinute <= 0 {
 		jwtTTLMinute = 60
 	}
-	return &Service{repo: repo, jwtSecret: strings.TrimSpace(jwtSecret), jwtTTLMinute: jwtTTLMinute}
+	if refreshTTLMinutes <= 0 {
+		refreshTTLMinutes = 60 * 24 * 7
+	}
+	return &Service{
+		repo:              repo,
+		jwtSecret:         strings.TrimSpace(jwtSecret),
+		jwtTTLMinute:      jwtTTLMinute,
+		refreshTTLMinutes: refreshTTLMinutes,
+	}
 }
 
 func (s *Service) Save(ctx context.Context, item User) (User, error) {
@@ -70,23 +81,101 @@ func (s *Service) Login(ctx context.Context, tenantID string, in LoginInput) (Lo
 	if err != nil {
 		return LoginResult{}, sharederrors.Internal("failed to load user roles")
 	}
-	exp := time.Now().UTC().Add(time.Duration(s.jwtTTLMinute) * time.Minute)
-	token, err := signHS256JWT(s.jwtSecret, map[string]any{
-		"sub":       user.ID,
+	return s.issueSessionTokens(ctx, tenantID, user.ID, roles)
+}
+
+func (s *Service) Refresh(ctx context.Context, tenantID string, in RefreshInput) (LoginResult, error) {
+	if strings.TrimSpace(in.RefreshToken) == "" {
+		return LoginResult{}, sharederrors.BadRequest("refresh_token is required")
+	}
+	hash := hashRefreshToken(in.RefreshToken)
+	sessionID, userID, exp, err := s.repo.GetActiveSessionByRefreshHash(ctx, tenantID, hash)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return LoginResult{}, sharederrors.BadRequest("invalid refresh token")
+		}
+		return LoginResult{}, sharederrors.Internal("failed to load auth session")
+	}
+	if time.Now().UTC().After(exp) {
+		return LoginResult{}, sharederrors.BadRequest("refresh token expired")
+	}
+	roles, err := s.repo.RolesForUser(ctx, tenantID, userID)
+	if err != nil {
+		return LoginResult{}, sharederrors.Internal("failed to load user roles")
+	}
+	accessExp := time.Now().UTC().Add(time.Duration(s.jwtTTLMinute) * time.Minute)
+	access, err := signHS256JWT(s.jwtSecret, map[string]any{
+		"sub":       userID,
 		"tenant_id": tenantID,
 		"roles":     roles,
-		"exp":       exp.Unix(),
+		"exp":       accessExp.Unix(),
 	})
 	if err != nil {
 		return LoginResult{}, sharederrors.Internal("failed to issue token")
 	}
+	newRefreshToken, err := generateRandomToken(48)
+	if err != nil {
+		return LoginResult{}, sharederrors.Internal("failed to generate refresh token")
+	}
+	refreshExp := time.Now().UTC().Add(time.Duration(s.refreshTTLMinutes) * time.Minute)
+	if err := s.repo.RotateSessionRefreshToken(ctx, sessionID, hashRefreshToken(newRefreshToken), refreshExp); err != nil {
+		return LoginResult{}, sharederrors.Internal("failed to rotate refresh token")
+	}
 	return LoginResult{
-		Token:     token,
-		TokenType: "Bearer",
-		ExpiresAt: exp.Unix(),
-		UserID:    user.ID,
-		TenantID:  tenantID,
-		Roles:     roles,
+		Token:            access,
+		TokenType:        "Bearer",
+		ExpiresAt:        accessExp.Unix(),
+		RefreshToken:     newRefreshToken,
+		RefreshExpiresAt: refreshExp.Unix(),
+		UserID:           userID,
+		TenantID:         tenantID,
+		Roles:            roles,
+	}, nil
+}
+
+func (s *Service) Logout(ctx context.Context, tenantID string, in RefreshInput) error {
+	if strings.TrimSpace(in.RefreshToken) == "" {
+		return sharederrors.BadRequest("refresh_token is required")
+	}
+	if err := s.repo.RevokeSessionByRefreshHash(ctx, tenantID, hashRefreshToken(in.RefreshToken)); err != nil {
+		return sharederrors.Internal("failed to revoke auth session")
+	}
+	return nil
+}
+
+func (s *Service) issueSessionTokens(ctx context.Context, tenantID, userID string, roles []string) (LoginResult, error) {
+	accessExp := time.Now().UTC().Add(time.Duration(s.jwtTTLMinute) * time.Minute)
+	access, err := signHS256JWT(s.jwtSecret, map[string]any{
+		"sub":       userID,
+		"tenant_id": tenantID,
+		"roles":     roles,
+		"exp":       accessExp.Unix(),
+	})
+	if err != nil {
+		return LoginResult{}, sharederrors.Internal("failed to issue token")
+	}
+	refreshToken, err := generateRandomToken(48)
+	if err != nil {
+		return LoginResult{}, sharederrors.Internal("failed to generate refresh token")
+	}
+	sessionRandom, err := generateRandomToken(6)
+	if err != nil {
+		return LoginResult{}, sharederrors.Internal("failed to generate session id")
+	}
+	sessionID := "sess_" + userID + "_" + strings.ToLower(sessionRandom)
+	refreshExp := time.Now().UTC().Add(time.Duration(s.refreshTTLMinutes) * time.Minute)
+	if err := s.repo.CreateAuthSession(ctx, sessionID, tenantID, userID, hashRefreshToken(refreshToken), refreshExp); err != nil {
+		return LoginResult{}, sharederrors.Internal("failed to create auth session")
+	}
+	return LoginResult{
+		Token:            access,
+		TokenType:        "Bearer",
+		ExpiresAt:        accessExp.Unix(),
+		RefreshToken:     refreshToken,
+		RefreshExpiresAt: refreshExp.Unix(),
+		UserID:           userID,
+		TenantID:         tenantID,
+		Roles:            roles,
 	}, nil
 }
 
@@ -122,4 +211,17 @@ func hmacSHA256(secret, msg []byte) []byte {
 	mac := hmac.New(sha256.New, secret)
 	_, _ = mac.Write(msg)
 	return mac.Sum(nil)
+}
+
+func hashRefreshToken(token string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(token)))
+	return hex.EncodeToString(sum[:])
+}
+
+func generateRandomToken(n int) (string, error) {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }

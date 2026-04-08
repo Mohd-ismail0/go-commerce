@@ -34,6 +34,7 @@ make build
 - Idempotency-key support for write APIs.
 - Sensitive routes require permission checks from signed user JWT (`X-User-JWT`) plus DB role mappings.
 - Legacy role-header bypass is disabled by default and can be toggled with `ALLOW_LEGACY_ROLE_BYPASS=true` for migration windows.
+- Identity now supports `login`, `refresh`, and `logout` session flows with hashed refresh tokens stored server-side.
 
 ## Rollback guidance
 

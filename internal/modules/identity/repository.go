@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"strings"
+	"time"
 )
 
 type Repository struct {
@@ -80,4 +81,43 @@ WHERE ur.user_id = $1 AND r.tenant_id = $2
 		}
 	}
 	return out, rows.Err()
+}
+
+func (r *Repository) CreateAuthSession(ctx context.Context, sessionID, tenantID, userID, refreshHash string, expiresAt time.Time) error {
+	_, err := r.db.ExecContext(ctx, `
+INSERT INTO auth_sessions (id, tenant_id, user_id, refresh_token_hash, expires_at, revoked_at, created_at, updated_at)
+VALUES ($1,$2,$3,$4,$5,NULL,NOW(),NOW())
+`, sessionID, tenantID, userID, refreshHash, expiresAt.UTC())
+	return err
+}
+
+func (r *Repository) GetActiveSessionByRefreshHash(ctx context.Context, tenantID, refreshHash string) (string, string, time.Time, error) {
+	row := r.db.QueryRowContext(ctx, `
+SELECT id, user_id, expires_at
+FROM auth_sessions
+WHERE tenant_id = $1 AND refresh_token_hash = $2 AND revoked_at IS NULL
+LIMIT 1
+`, tenantID, refreshHash)
+	var sessionID, userID string
+	var expiresAt time.Time
+	err := row.Scan(&sessionID, &userID, &expiresAt)
+	return sessionID, userID, expiresAt, err
+}
+
+func (r *Repository) RotateSessionRefreshToken(ctx context.Context, sessionID, newRefreshHash string, newExpiresAt time.Time) error {
+	_, err := r.db.ExecContext(ctx, `
+UPDATE auth_sessions
+SET refresh_token_hash = $2, expires_at = $3, updated_at = NOW()
+WHERE id = $1
+`, sessionID, newRefreshHash, newExpiresAt.UTC())
+	return err
+}
+
+func (r *Repository) RevokeSessionByRefreshHash(ctx context.Context, tenantID, refreshHash string) error {
+	_, err := r.db.ExecContext(ctx, `
+UPDATE auth_sessions
+SET revoked_at = NOW(), updated_at = NOW()
+WHERE tenant_id = $1 AND refresh_token_hash = $2 AND revoked_at IS NULL
+`, tenantID, refreshHash)
+	return err
 }

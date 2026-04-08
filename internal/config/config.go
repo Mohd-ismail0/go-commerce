@@ -14,6 +14,7 @@ type Config struct {
 	APIAuthToken          string
 	AuthJWTSecret         string
 	AuthJWTTTLMinutes     int
+	AuthRefreshTTLMinutes int
 	AllowLegacyRoleBypass bool
 	DefaultRegionID       string
 	DefaultTenantID       string
@@ -41,6 +42,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	authRefreshTTLMinutes, err := getEnvIntInRange("AUTH_REFRESH_TTL_MINUTES", 10080, 1, 525600)
+	if err != nil {
+		return Config{}, err
+	}
 
 	cfg := Config{
 		AppEnv:                getEnv("APP_ENV", "development"),
@@ -49,6 +54,7 @@ func Load() (Config, error) {
 		APIAuthToken:          getEnv("API_AUTH_TOKEN", ""),
 		AuthJWTSecret:         getEnv("AUTH_JWT_SECRET", ""),
 		AuthJWTTTLMinutes:     authJWTTTLMinutes,
+		AuthRefreshTTLMinutes: authRefreshTTLMinutes,
 		AllowLegacyRoleBypass: getEnvBool("ALLOW_LEGACY_ROLE_BYPASS", false),
 		DefaultRegionID:       getEnv("DEFAULT_REGION_ID", "global"),
 		DefaultTenantID:       getEnv("DEFAULT_TENANT_ID", "public"),

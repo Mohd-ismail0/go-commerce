@@ -68,3 +68,15 @@ func TestLoadParsesLegacyBypassFlag(t *testing.T) {
 		t.Fatalf("expected AllowLegacyRoleBypass to be true")
 	}
 }
+
+func TestLoadParsesAuthRefreshTTL(t *testing.T) {
+	t.Setenv("APP_ENV", "test")
+	t.Setenv("AUTH_REFRESH_TTL_MINUTES", "1440")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.AuthRefreshTTLMinutes != 1440 {
+		t.Fatalf("expected AuthRefreshTTLMinutes=1440, got %d", cfg.AuthRefreshTTLMinutes)
+	}
+}

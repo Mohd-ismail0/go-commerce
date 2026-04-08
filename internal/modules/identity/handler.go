@@ -20,6 +20,8 @@ func NewHandler(svc *Service) *Handler {
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Route("/identity/auth", func(r chi.Router) {
 		r.Post("/login", h.login)
+		r.Post("/refresh", h.refresh)
+		r.Post("/logout", h.logout)
 	})
 	r.Route("/identity/users", func(r chi.Router) {
 		r.Get("/", h.list)
@@ -67,4 +69,31 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	utils.JSON(w, http.StatusOK, res)
+}
+
+func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
+	var in RefreshInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
+		return
+	}
+	res, err := h.svc.Refresh(r.Context(), middleware.TenantIDFromContext(r.Context()), in)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, res)
+}
+
+func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
+	var in RefreshInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
+		return
+	}
+	if err := h.svc.Logout(r.Context(), middleware.TenantIDFromContext(r.Context()), in); err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }

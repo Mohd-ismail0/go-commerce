@@ -36,6 +36,22 @@ func TestAPITokenAllowsIdentityLoginWithoutToken(t *testing.T) {
 	}
 }
 
+func TestAPITokenAllowsIdentityRefreshAndLogoutWithoutToken(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	h := APIToken("expected-token")(next)
+
+	for _, path := range []string{"/identity/auth/refresh", "/identity/auth/logout"} {
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected status 200 for %s, got %d", path, rr.Code)
+		}
+	}
+}
+
 func TestAPITokenAllowsHealthRoutesWithoutToken(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

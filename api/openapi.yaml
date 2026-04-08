@@ -1150,6 +1150,24 @@ paths:
       responses:
         "200":
           description: Login success with token
+  /identity/auth/refresh:
+    post:
+      summary: Rotate refresh token and issue a new signed user JWT
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Refresh success with rotated refresh token
+  /identity/auth/logout:
+    post:
+      summary: Revoke active refresh token session
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Logout success
   /translations:
     post:
       summary: Upsert translation

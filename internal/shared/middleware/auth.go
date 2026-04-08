@@ -96,6 +96,9 @@ func isPublicRoute(path string) bool {
 	if path == "/identity/auth/login" {
 		return true
 	}
+	if path == "/identity/auth/refresh" || path == "/identity/auth/logout" {
+		return true
+	}
 	return strings.HasPrefix(path, "/webhooks/")
 }
 
