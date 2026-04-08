@@ -15,6 +15,8 @@ type Repository interface {
 	Upsert(ctx context.Context, product Product, idempotencyKey string) (Product, error)
 	List(ctx context.Context, tenantID, regionID, sku string, cursor *time.Time, limit int32) ([]Product, error)
 	ListProductTranslations(ctx context.Context, tenantID, regionID string, productIDs []string, languageCode string) (map[string]map[string]string, error)
+	ListCategoryTranslations(ctx context.Context, tenantID, regionID string, categoryIDs []string, languageCode string) (map[string]map[string]string, error)
+	ListCollectionTranslations(ctx context.Context, tenantID, regionID string, collectionIDs []string, languageCode string) (map[string]map[string]string, error)
 	IsProductSlugAvailable(ctx context.Context, tenantID, regionID, slug, productID string) (bool, error)
 	UpsertVariant(ctx context.Context, variant ProductVariant) (ProductVariant, error)
 	ListVariants(ctx context.Context, tenantID, regionID, productID string) ([]ProductVariant, error)
@@ -29,8 +31,20 @@ type Repository interface {
 }
 
 func (r *PostgresRepository) ListProductTranslations(ctx context.Context, tenantID, regionID string, productIDs []string, languageCode string) (map[string]map[string]string, error) {
+	return r.listEntityTranslations(ctx, tenantID, regionID, "product", productIDs, languageCode)
+}
+
+func (r *PostgresRepository) ListCategoryTranslations(ctx context.Context, tenantID, regionID string, categoryIDs []string, languageCode string) (map[string]map[string]string, error) {
+	return r.listEntityTranslations(ctx, tenantID, regionID, "category", categoryIDs, languageCode)
+}
+
+func (r *PostgresRepository) ListCollectionTranslations(ctx context.Context, tenantID, regionID string, collectionIDs []string, languageCode string) (map[string]map[string]string, error) {
+	return r.listEntityTranslations(ctx, tenantID, regionID, "collection", collectionIDs, languageCode)
+}
+
+func (r *PostgresRepository) listEntityTranslations(ctx context.Context, tenantID, regionID, entityType string, entityIDs []string, languageCode string) (map[string]map[string]string, error) {
 	out := map[string]map[string]string{}
-	if languageCode == "" || len(productIDs) == 0 {
+	if languageCode == "" || len(entityIDs) == 0 {
 		return out, nil
 	}
 	rows, err := r.db.QueryContext(ctx, `
@@ -38,9 +52,9 @@ SELECT entity_id, fields
 FROM translations
 WHERE tenant_id = $1
   AND region_id = $2
-  AND entity_type = 'product'
-  AND language_code = $3
-`, tenantID, regionID, languageCode)
+  AND entity_type = $3
+  AND language_code = $4
+`, tenantID, regionID, entityType, languageCode)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +80,7 @@ WHERE tenant_id = $1
 		return nil, err
 	}
 	allowed := map[string]struct{}{}
-	for _, id := range productIDs {
+	for _, id := range entityIDs {
 		allowed[id] = struct{}{}
 	}
 	filtered := map[string]map[string]string{}

@@ -128,8 +128,30 @@ func (s *Service) SaveCategory(ctx context.Context, category Category) (Category
 	return saved, nil
 }
 
-func (s *Service) ListCategories(ctx context.Context, tenantID, regionID string) ([]Category, error) {
-	return s.repo.ListCategories(ctx, tenantID, regionID)
+func (s *Service) ListCategories(ctx context.Context, tenantID, regionID, languageCode string) ([]Category, error) {
+	items, err := s.repo.ListCategories(ctx, tenantID, regionID)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(languageCode) == "" || len(items) == 0 {
+		return items, nil
+	}
+	ids := make([]string, 0, len(items))
+	for _, it := range items {
+		ids = append(ids, it.ID)
+	}
+	translations, err := s.repo.ListCategoryTranslations(ctx, tenantID, regionID, ids, strings.TrimSpace(languageCode))
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if fields, ok := translations[items[i].ID]; ok {
+			if v := strings.TrimSpace(fields["name"]); v != "" {
+				items[i].Name = v
+			}
+		}
+	}
+	return items, nil
 }
 
 func (s *Service) SaveCollection(ctx context.Context, collection Collection) (Collection, error) {
@@ -143,8 +165,30 @@ func (s *Service) SaveCollection(ctx context.Context, collection Collection) (Co
 	return saved, nil
 }
 
-func (s *Service) ListCollections(ctx context.Context, tenantID, regionID string) ([]Collection, error) {
-	return s.repo.ListCollections(ctx, tenantID, regionID)
+func (s *Service) ListCollections(ctx context.Context, tenantID, regionID, languageCode string) ([]Collection, error) {
+	items, err := s.repo.ListCollections(ctx, tenantID, regionID)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(languageCode) == "" || len(items) == 0 {
+		return items, nil
+	}
+	ids := make([]string, 0, len(items))
+	for _, it := range items {
+		ids = append(ids, it.ID)
+	}
+	translations, err := s.repo.ListCollectionTranslations(ctx, tenantID, regionID, ids, strings.TrimSpace(languageCode))
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if fields, ok := translations[items[i].ID]; ok {
+			if v := strings.TrimSpace(fields["name"]); v != "" {
+				items[i].Name = v
+			}
+		}
+	}
+	return items, nil
 }
 
 func (s *Service) AssignProductToCollection(ctx context.Context, tenantID, regionID, collectionID, productID string) error {

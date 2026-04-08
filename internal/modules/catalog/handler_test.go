@@ -18,6 +18,8 @@ import (
 type catalogFakeRepo struct {
 	items              []Product
 	productTranslations map[string]map[string]map[string]string
+	categoryTranslations map[string]map[string]map[string]string
+	collectionTranslations map[string]map[string]map[string]string
 	variants           []ProductVariant
 	categories         []Category
 	collections        []Collection
@@ -66,6 +68,36 @@ func (r *catalogFakeRepo) ListProductTranslations(_ context.Context, _, _ string
 	}
 	for _, id := range productIDs {
 		if byLang, ok := r.productTranslations[id]; ok {
+			if fields, ok := byLang[languageCode]; ok {
+				out[id] = fields
+			}
+		}
+	}
+	return out, nil
+}
+
+func (r *catalogFakeRepo) ListCategoryTranslations(_ context.Context, _, _ string, categoryIDs []string, languageCode string) (map[string]map[string]string, error) {
+	out := map[string]map[string]string{}
+	if r.categoryTranslations == nil || languageCode == "" {
+		return out, nil
+	}
+	for _, id := range categoryIDs {
+		if byLang, ok := r.categoryTranslations[id]; ok {
+			if fields, ok := byLang[languageCode]; ok {
+				out[id] = fields
+			}
+		}
+	}
+	return out, nil
+}
+
+func (r *catalogFakeRepo) ListCollectionTranslations(_ context.Context, _, _ string, collectionIDs []string, languageCode string) (map[string]map[string]string, error) {
+	out := map[string]map[string]string{}
+	if r.collectionTranslations == nil || languageCode == "" {
+		return out, nil
+	}
+	for _, id := range collectionIDs {
+		if byLang, ok := r.collectionTranslations[id]; ok {
 			if fields, ok := byLang[languageCode]; ok {
 				out[id] = fields
 			}
@@ -381,5 +413,57 @@ func TestProductsListAppliesLanguageTranslationOverlay(t *testing.T) {
 	body := rr.Body.String()
 	if !strings.Contains(body, "Nom FR") || !strings.Contains(body, "Description FR") || !strings.Contains(body, "SEO FR") || !strings.Contains(body, "Meta FR") {
 		t.Fatalf("expected localized values in response, got: %s", body)
+	}
+}
+
+func TestCategoriesListAppliesLanguageTranslationOverlay(t *testing.T) {
+	repo := &catalogFakeRepo{
+		categories: []Category{
+			{ID: "cat1", TenantID: "tenant_a", RegionID: "global", Name: "Default Category", Slug: "default-category"},
+		},
+		categoryTranslations: map[string]map[string]map[string]string{
+			"cat1": {"fr": {"name": "Categorie FR"}},
+		},
+	}
+	h := NewHandler(NewService(repo, events.NewBus()))
+	r := chi.NewRouter()
+	r.Use(middleware.TenantRegion("public", "global"))
+	h.RegisterRoutes(r)
+	req := httptest.NewRequest(http.MethodGet, "/categories/?language_code=fr", nil)
+	req.Header.Set("X-Tenant-ID", "tenant_a")
+	req.Header.Set("X-Region-ID", "global")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "Categorie FR") {
+		t.Fatalf("expected localized category name, got: %s", rr.Body.String())
+	}
+}
+
+func TestCollectionsListAppliesLanguageTranslationOverlay(t *testing.T) {
+	repo := &catalogFakeRepo{
+		collections: []Collection{
+			{ID: "col1", TenantID: "tenant_a", RegionID: "global", Name: "Default Collection", Slug: "default-collection"},
+		},
+		collectionTranslations: map[string]map[string]map[string]string{
+			"col1": {"fr": {"name": "Collection FR"}},
+		},
+	}
+	h := NewHandler(NewService(repo, events.NewBus()))
+	r := chi.NewRouter()
+	r.Use(middleware.TenantRegion("public", "global"))
+	h.RegisterRoutes(r)
+	req := httptest.NewRequest(http.MethodGet, "/collections/?language_code=fr", nil)
+	req.Header.Set("X-Tenant-ID", "tenant_a")
+	req.Header.Set("X-Region-ID", "global")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "Collection FR") {
+		t.Fatalf("expected localized collection name, got: %s", rr.Body.String())
 	}
 }

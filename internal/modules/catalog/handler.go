@@ -163,7 +163,8 @@ func (h *Handler) createCategory(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listCategories(w http.ResponseWriter, r *http.Request) {
 	tenantID := middleware.TenantIDFromContext(r.Context())
 	regionID := middleware.RegionIDFromContext(r.Context())
-	items, err := h.svc.ListCategories(r.Context(), tenantID, regionID)
+	languageCode := strings.TrimSpace(r.URL.Query().Get("language_code"))
+	items, err := h.svc.ListCategories(r.Context(), tenantID, regionID, languageCode)
 	if err != nil {
 		utils.WriteError(w, err)
 		return
@@ -193,7 +194,8 @@ func (h *Handler) createCollection(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listCollections(w http.ResponseWriter, r *http.Request) {
 	tenantID := middleware.TenantIDFromContext(r.Context())
 	regionID := middleware.RegionIDFromContext(r.Context())
-	items, err := h.svc.ListCollections(r.Context(), tenantID, regionID)
+	languageCode := strings.TrimSpace(r.URL.Query().Get("language_code"))
+	items, err := h.svc.ListCollections(r.Context(), tenantID, regionID, languageCode)
 	if err != nil {
 		utils.WriteError(w, err)
 		return

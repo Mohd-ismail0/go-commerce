@@ -1097,6 +1097,11 @@ paths:
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
+        - in: query
+          name: language_code
+          description: Optional locale/language code used to overlay translated category names.
+          schema:
+            type: string
       responses:
         "200":
           description: Category list
@@ -1149,6 +1154,11 @@ paths:
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
+        - in: query
+          name: language_code
+          description: Optional locale/language code used to overlay translated collection names.
+          schema:
+            type: string
       responses:
         "200":
           description: Collection list
