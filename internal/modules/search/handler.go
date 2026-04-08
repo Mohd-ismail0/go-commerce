@@ -3,6 +3,8 @@ package search
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"rewrite/internal/shared/middleware"
@@ -18,6 +20,7 @@ func NewHandler(svc *Service) *Handler {
 }
 
 func (h *Handler) RegisterRoutes(r chi.Router) {
+	r.Get("/search", h.query)
 	r.Post("/search/index", h.save)
 }
 
@@ -33,4 +36,19 @@ func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 		item.ID = utils.NewID("sdc")
 	}
 	utils.JSON(w, http.StatusCreated, h.svc.Save(r.Context(), item))
+}
+
+func (h *Handler) query(w http.ResponseWriter, r *http.Request) {
+	tenantID := middleware.TenantIDFromContext(r.Context())
+	regionID := middleware.RegionIDFromContext(r.Context())
+	entityType := strings.TrimSpace(r.URL.Query().Get("entity_type"))
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	limit := 20
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	items := h.svc.Query(r.Context(), tenantID, regionID, entityType, q, limit)
+	utils.JSON(w, http.StatusOK, map[string]any{"items": items})
 }

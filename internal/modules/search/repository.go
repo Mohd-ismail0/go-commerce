@@ -20,3 +20,29 @@ updated_at = NOW()
 `, item.ID, item.TenantID, item.RegionID, item.EntityType, item.EntityID, item.Query)
 	return item
 }
+
+func (r *Repository) Query(tenantID, regionID, entityType, query string, limit int) []SearchHit {
+	rows, err := r.db.Query(`
+SELECT entity_type, entity_id
+FROM search_documents
+WHERE tenant_id = $1
+  AND region_id = $2
+  AND ($3::text = '' OR entity_type = $3)
+  AND ($4::text = '' OR document @@ plainto_tsquery('simple', $4))
+ORDER BY updated_at DESC
+LIMIT $5
+`, tenantID, regionID, entityType, query, limit)
+	if err != nil {
+		return []SearchHit{}
+	}
+	defer rows.Close()
+	out := make([]SearchHit, 0, limit)
+	for rows.Next() {
+		var h SearchHit
+		if err := rows.Scan(&h.EntityType, &h.EntityID); err != nil {
+			continue
+		}
+		out = append(out, h)
+	}
+	return out
+}

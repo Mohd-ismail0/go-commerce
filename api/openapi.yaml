@@ -2127,3 +2127,48 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /search:
+    get:
+      operationId: get_search
+      summary: Search indexed documents
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: query
+          name: q
+          schema:
+            type: string
+        - in: query
+          name: entity_type
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Search hits
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ItemsResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            entity_type: { type: string }
+                            entity_id: { type: string }
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"

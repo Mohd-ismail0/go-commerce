@@ -8,3 +8,8 @@ type Document struct {
 	EntityID   string `json:"entity_id"`
 	Query      string `json:"query"`
 }
+
+type SearchHit struct {
+	EntityType string `json:"entity_type"`
+	EntityID   string `json:"entity_id"`
+}
