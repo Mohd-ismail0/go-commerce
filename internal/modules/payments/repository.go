@@ -146,11 +146,20 @@ LIMIT 1
 }
 
 func (r *Repository) GetIdempotency(ctx context.Context, tenantID, scope, key string) (string, error) {
-	return r.q.GetIdempotencyResource(ctx, tenantID, scope, key)
+	return r.q.GetIdempotencyResource(ctx, dbsqlc.GetIdempotencyResourceParams{
+		TenantID:       tenantID,
+		Scope:          scope,
+		IdempotencyKey: key,
+	})
 }
 
 func (r *Repository) SaveIdempotency(ctx context.Context, tenantID, scope, key, resourceID string) error {
-	return r.q.SaveIdempotencyResource(ctx, tenantID, scope, key, resourceID)
+	return r.q.SaveIdempotencyResource(ctx, dbsqlc.SaveIdempotencyResourceParams{
+		TenantID:       tenantID,
+		Scope:          scope,
+		IdempotencyKey: key,
+		ResourceID:     resourceID,
+	})
 }
 
 func (r *Repository) ListForRegion(ctx context.Context, tenantID, regionID string) ([]Payment, error) {

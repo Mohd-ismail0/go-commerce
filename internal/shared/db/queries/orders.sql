@@ -24,4 +24,5 @@ FROM orders
 WHERE tenant_id = $1
   AND ($2::text = '' OR region_id = $2)
   AND ($3::timestamptz IS NULL OR created_at < $3)
-ORDER BY created_at DESC;
+ORDER BY created_at DESC
+LIMIT $4;

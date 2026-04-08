@@ -1233,8 +1233,15 @@ paths:
       responses:
         "201":
           description: Dispute saved
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /payments/reconciliation-actions:
     get:
+      operationId: get_payments_reconciliation_actions
       summary: List reconciliation remediation actions
       security:
         - ApiTokenAuth: []

@@ -26,9 +26,16 @@ func NewRepository(conn *sql.DB) Repository {
 
 func (r *PostgresRepository) Insert(ctx context.Context, order Order, idempotencyKey string) (Order, error) {
 	if idempotencyKey != "" {
-		resourceID, err := r.queries.GetIdempotencyResource(ctx, order.TenantID, "orders.create", idempotencyKey)
+		resourceID, err := r.queries.GetIdempotencyResource(ctx, dbsqlc.GetIdempotencyResourceParams{
+			TenantID:       order.TenantID,
+			Scope:          "orders.create",
+			IdempotencyKey: idempotencyKey,
+		})
 		if err == nil && resourceID != "" {
-			existing, getErr := r.queries.GetOrderByID(ctx, order.TenantID, resourceID)
+			existing, getErr := r.queries.GetOrderByID(ctx, dbsqlc.GetOrderByIDParams{
+				ID:       resourceID,
+				TenantID: order.TenantID,
+			})
 			if getErr == nil {
 				return mapOrder(existing), nil
 			}
@@ -47,21 +54,29 @@ func (r *PostgresRepository) Insert(ctx context.Context, order Order, idempotenc
 		return Order{}, err
 	}
 	if idempotencyKey != "" {
-		_ = r.queries.SaveIdempotencyResource(ctx, order.TenantID, "orders.create", idempotencyKey, row.ID)
+		_ = r.queries.SaveIdempotencyResource(ctx, dbsqlc.SaveIdempotencyResourceParams{
+			TenantID:       order.TenantID,
+			Scope:          "orders.create",
+			IdempotencyKey: idempotencyKey,
+			ResourceID:     row.ID,
+		})
 	}
 	return mapOrder(row), nil
 }
 
 func (r *PostgresRepository) UpdateStatus(ctx context.Context, tenantID string, input StatusUpdateInput) (Order, error) {
-	current, err := r.queries.GetOrderByID(ctx, tenantID, input.ID)
+	current, err := r.queries.GetOrderByID(ctx, dbsqlc.GetOrderByIDParams{
+		ID:       input.ID,
+		TenantID: tenantID,
+	})
 	if err != nil {
 		return Order{}, err
 	}
 	row, err := r.queries.UpdateOrderStatus(ctx, dbsqlc.UpdateOrderStatusParams{
-		ID:                input.ID,
-		TenantID:          tenantID,
-		Status:            input.Status,
-		ExpectedUpdatedAt: input.ExpectedUpdatedAt,
+		ID:       input.ID,
+		TenantID: tenantID,
+		Status:   input.Status,
+		UpdatedAt: input.ExpectedUpdatedAt,
 	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -69,12 +84,21 @@ func (r *PostgresRepository) UpdateStatus(ctx context.Context, tenantID string, 
 		}
 		return Order{}, err
 	}
-	_ = r.queries.InsertOrderAudit(ctx, tenantID, row.RegionID, row.ID, current.Status, row.Status)
+	_ = r.queries.InsertOrderAudit(ctx, dbsqlc.InsertOrderAuditParams{
+		TenantID:       tenantID,
+		RegionID:       row.RegionID,
+		OrderID:        row.ID,
+		PreviousStatus: current.Status,
+		NewStatus:      row.Status,
+	})
 	return mapOrder(row), nil
 }
 
 func (r *PostgresRepository) GetByID(ctx context.Context, tenantID, orderID string) (Order, error) {
-	row, err := r.queries.GetOrderByID(ctx, tenantID, orderID)
+	row, err := r.queries.GetOrderByID(ctx, dbsqlc.GetOrderByIDParams{
+		ID:       orderID,
+		TenantID: tenantID,
+	})
 	if err != nil {
 		return Order{}, err
 	}
@@ -84,8 +108,8 @@ func (r *PostgresRepository) GetByID(ctx context.Context, tenantID, orderID stri
 func (r *PostgresRepository) List(ctx context.Context, tenantID, regionID string, cursor *time.Time, limit int32) ([]Order, error) {
 	rows, err := r.queries.ListOrdersByTenantRegion(ctx, dbsqlc.ListOrdersByTenantRegionParams{
 		TenantID: tenantID,
-		RegionID: regionID,
-		Cursor:   cursor,
+		Column2:  regionID,
+		Column3:  derefTime(cursor),
 		Limit:    limit,
 	})
 	if err != nil {
@@ -96,6 +120,13 @@ func (r *PostgresRepository) List(ctx context.Context, tenantID, regionID string
 		out = append(out, mapOrder(row))
 	}
 	return out, nil
+}
+
+func derefTime(t *time.Time) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return *t
 }
 
 func mapOrder(row dbsqlc.Order) Order {

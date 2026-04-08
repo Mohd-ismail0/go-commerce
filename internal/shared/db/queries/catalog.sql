@@ -27,7 +27,8 @@ WHERE tenant_id = $1
   AND ($2::text = '' OR region_id = $2)
   AND ($3::text = '' OR sku = $3)
   AND ($4::timestamptz IS NULL OR created_at < $4)
-ORDER BY created_at DESC;
+ORDER BY created_at DESC
+LIMIT $5;
 
 -- name: UpsertProductVariant :one
 INSERT INTO product_variants (

@@ -33,9 +33,16 @@ func NewRepository(conn *sql.DB) Repository {
 
 func (r *PostgresRepository) Upsert(ctx context.Context, product Product, idempotencyKey string) (Product, error) {
 	if idempotencyKey != "" {
-		resourceID, err := r.queries.GetIdempotencyResource(ctx, product.TenantID, "products.upsert", idempotencyKey)
+		resourceID, err := r.queries.GetIdempotencyResource(ctx, dbsqlc.GetIdempotencyResourceParams{
+			TenantID:       product.TenantID,
+			Scope:          "products.upsert",
+			IdempotencyKey: idempotencyKey,
+		})
 		if err == nil && resourceID != "" {
-			existing, getErr := r.queries.GetProductByID(ctx, product.TenantID, resourceID)
+			existing, getErr := r.queries.GetProductByID(ctx, dbsqlc.GetProductByIDParams{
+				ID:       resourceID,
+				TenantID: product.TenantID,
+			})
 			if getErr == nil {
 				return Product{
 					ID:         existing.ID,
@@ -62,7 +69,12 @@ func (r *PostgresRepository) Upsert(ctx context.Context, product Product, idempo
 		return Product{}, err
 	}
 	if idempotencyKey != "" {
-		_ = r.queries.SaveIdempotencyResource(ctx, product.TenantID, "products.upsert", idempotencyKey, row.ID)
+		_ = r.queries.SaveIdempotencyResource(ctx, dbsqlc.SaveIdempotencyResourceParams{
+			TenantID:       product.TenantID,
+			Scope:          "products.upsert",
+			IdempotencyKey: idempotencyKey,
+			ResourceID:     row.ID,
+		})
 	}
 	return Product{
 		ID:         row.ID,
@@ -78,9 +90,9 @@ func (r *PostgresRepository) Upsert(ctx context.Context, product Product, idempo
 func (r *PostgresRepository) List(ctx context.Context, tenantID, regionID, sku string, cursor *time.Time, limit int32) ([]Product, error) {
 	rows, err := r.queries.ListProductsByTenantRegion(ctx, dbsqlc.ListProductsByTenantRegionParams{
 		TenantID: tenantID,
-		RegionID: regionID,
-		Sku:      sku,
-		Cursor:   cursor,
+		Column2:  regionID,
+		Column3:  sku,
+		Column4:  derefTime(cursor),
 		Limit:    limit,
 	})
 	if err != nil {
@@ -157,12 +169,19 @@ func (r *PostgresRepository) IsSKUTenantRegionAvailable(ctx context.Context, ten
 		TenantID:  tenantID,
 		RegionID:  regionID,
 		Sku:       sku,
-		VariantID: variantID,
+		Column4:   variantID,
 	})
 	if err != nil {
 		return false, err
 	}
 	return !exists, nil
+}
+
+func derefTime(t *time.Time) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return *t
 }
 
 func (r *PostgresRepository) InsertCategory(ctx context.Context, category Category) (Category, error) {
