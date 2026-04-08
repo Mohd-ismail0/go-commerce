@@ -38,7 +38,7 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		CountryCode string `json:"country_code"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		utils.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
 		return
 	}
 	id := req.ID
@@ -66,7 +66,7 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) upsertLine(w http.ResponseWriter, r *http.Request) {
 	var req Line
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		utils.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
 		return
 	}
 	req.CheckoutID = chi.URLParam(r, "checkout_id")
@@ -91,7 +91,7 @@ func (h *Handler) updateSessionContext(w http.ResponseWriter, r *http.Request) {
 		CountryCode string `json:"country_code"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		utils.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
 		return
 	}
 	updated, err := h.svc.UpdateSessionContext(

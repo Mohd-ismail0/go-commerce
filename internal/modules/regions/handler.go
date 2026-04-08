@@ -31,7 +31,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 	var item Region
 	if err := json.NewDecoder(r.Body).Decode(&item); err != nil {
-		utils.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
 		return
 	}
 	item.TenantID = middleware.TenantIDFromContext(r.Context())

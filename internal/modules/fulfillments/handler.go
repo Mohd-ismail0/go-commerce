@@ -33,7 +33,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		TrackingNumber string `json:"tracking_number"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		utils.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
 		return
 	}
 	id := req.ID

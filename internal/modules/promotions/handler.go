@@ -35,7 +35,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 	var p Promotion
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		utils.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
 		return
 	}
 	p.TenantID = middleware.TenantIDFromContext(r.Context())
@@ -50,7 +50,7 @@ func (h *Handler) listRules(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) saveRule(w http.ResponseWriter, r *http.Request) {
 	var p PromotionRule
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		utils.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
 		return
 	}
 	p.TenantID = middleware.TenantIDFromContext(r.Context())
@@ -65,7 +65,7 @@ func (h *Handler) listVouchers(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) saveVoucher(w http.ResponseWriter, r *http.Request) {
 	var v Voucher
 	if err := json.NewDecoder(r.Body).Decode(&v); err != nil {
-		utils.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
 		return
 	}
 	v.TenantID = middleware.TenantIDFromContext(r.Context())

@@ -36,7 +36,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 	var p PriceBookEntry
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		utils.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
 		return
 	}
 	p.TenantID = middleware.TenantIDFromContext(r.Context())
@@ -51,7 +51,7 @@ func (h *Handler) listTaxClasses(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) saveTaxClass(w http.ResponseWriter, r *http.Request) {
 	var p TaxClass
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		utils.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
 		return
 	}
 	p.TenantID = middleware.TenantIDFromContext(r.Context())
@@ -66,7 +66,7 @@ func (h *Handler) listTaxRates(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) saveTaxRate(w http.ResponseWriter, r *http.Request) {
 	var p TaxRate
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		utils.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
 		return
 	}
 	p.TenantID = middleware.TenantIDFromContext(r.Context())
@@ -77,7 +77,7 @@ func (h *Handler) saveTaxRate(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) calculate(w http.ResponseWriter, r *http.Request) {
 	var input CalculationInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		utils.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
 		return
 	}
 	input.TenantID = middleware.TenantIDFromContext(r.Context())

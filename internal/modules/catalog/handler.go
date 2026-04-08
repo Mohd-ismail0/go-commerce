@@ -87,7 +87,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) upsert(w http.ResponseWriter, r *http.Request) {
 	var p Product
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		utils.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
 		return
 	}
 	p.TenantID = middleware.TenantIDFromContext(r.Context())
@@ -111,7 +111,7 @@ func (h *Handler) upsert(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) upsertVariant(w http.ResponseWriter, r *http.Request) {
 	var v ProductVariant
 	if err := json.NewDecoder(r.Body).Decode(&v); err != nil {
-		utils.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
 		return
 	}
 	v.TenantID = middleware.TenantIDFromContext(r.Context())
@@ -143,7 +143,7 @@ func (h *Handler) listVariants(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) createCategory(w http.ResponseWriter, r *http.Request) {
 	var category Category
 	if err := json.NewDecoder(r.Body).Decode(&category); err != nil {
-		utils.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
 		return
 	}
 	category.TenantID = middleware.TenantIDFromContext(r.Context())
@@ -173,7 +173,7 @@ func (h *Handler) listCategories(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) createCollection(w http.ResponseWriter, r *http.Request) {
 	var collection Collection
 	if err := json.NewDecoder(r.Body).Decode(&collection); err != nil {
-		utils.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
 		return
 	}
 	collection.TenantID = middleware.TenantIDFromContext(r.Context())
@@ -215,7 +215,7 @@ func (h *Handler) assignProductToCollection(w http.ResponseWriter, r *http.Reque
 func (h *Handler) createProductMedia(w http.ResponseWriter, r *http.Request) {
 	var media ProductMedia
 	if err := json.NewDecoder(r.Body).Decode(&media); err != nil {
-		utils.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
 		return
 	}
 	media.TenantID = middleware.TenantIDFromContext(r.Context())

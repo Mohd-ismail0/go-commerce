@@ -69,7 +69,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	var o Order
 	if err := json.NewDecoder(r.Body).Decode(&o); err != nil {
-		utils.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
 		return
 	}
 	o.TenantID = middleware.TenantIDFromContext(r.Context())
@@ -97,7 +97,7 @@ func (h *Handler) updateStatus(w http.ResponseWriter, r *http.Request) {
 		ExpectedUpdatedAt string `json:"expected_updated_at"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		utils.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
 		return
 	}
 	tenantID := middleware.TenantIDFromContext(r.Context())
