@@ -2,8 +2,11 @@ openapi: 3.0.3
 info:
   title: Rewrite Commerce API
   version: 0.4.0
+  license:
+    name: Proprietary
+    url: https://example.com/license
 servers:
-  - url: http://localhost:8080
+  - url: https://api.rewrite.local
 security:
   - ApiTokenAuth: []
 components:
@@ -378,6 +381,7 @@ components:
 paths:
   /products:
     get:
+      operationId: get_products
       summary: List products
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -411,6 +415,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
     post:
+      operationId: post_products
       summary: Create or update product
       description: Idempotent upsert by product ID; retries with same payload are safe.
       parameters:
@@ -438,6 +443,7 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
   /orders:
     get:
+      operationId: get_orders
       summary: List orders
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -460,7 +466,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OrderListResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
+      operationId: post_orders
       summary: Create order
       description: Idempotent create by `Idempotency-Key` per tenant.
       parameters:
@@ -480,7 +493,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Order"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     patch:
+      operationId: patch_orders
       summary: Update order status
       description: "Allowed transitions: created->confirmed/cancelled, confirmed->completed/cancelled."
       parameters:
@@ -513,6 +533,7 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
   /products/{product_id}/variants:
     get:
+      operationId: get_products_by_product_id_variants
       summary: List product variants
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -535,7 +556,14 @@ paths:
                         type: array
                         items:
                           $ref: "#/components/schemas/ProductVariant"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
+      operationId: post_products_by_product_id_variants
       summary: Create product variant
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -557,7 +585,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProductVariant"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     patch:
+      operationId: patch_products_by_product_id_variants
       summary: Update product variant
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -579,8 +614,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProductVariant"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /products/{product_id}/media:
     get:
+      operationId: get_products_by_product_id_media
       summary: List product media
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -603,7 +645,14 @@ paths:
                         type: array
                         items:
                           $ref: "#/components/schemas/ProductMedia"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
+      operationId: post_products_by_product_id_media
       summary: Create product media
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -625,8 +674,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProductMedia"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /categories:
     get:
+      operationId: get_categories
       summary: List categories
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -645,7 +701,14 @@ paths:
                         type: array
                         items:
                           $ref: "#/components/schemas/Category"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
+      operationId: post_categories
       summary: Create category
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -663,8 +726,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Category"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /collections:
     get:
+      operationId: get_collections
       summary: List collections
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -683,7 +753,14 @@ paths:
                         type: array
                         items:
                           $ref: "#/components/schemas/Collection"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
+      operationId: post_collections
       summary: Create collection
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -701,8 +778,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Collection"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /collections/{collection_id}/products/{product_id}:
     post:
+      operationId: post_collections_by_collection_id_products_by_product_id
       summary: Assign product to collection
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -718,8 +802,15 @@ paths:
       responses:
         "201":
           description: Product assigned to collection
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /customers:
     get:
+      operationId: get_customers
       summary: List customers
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -727,7 +818,14 @@ paths:
       responses:
         "200":
           description: Customer list
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
+      operationId: post_customers
       summary: Create or update customer
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -735,8 +833,15 @@ paths:
       responses:
         "201":
           description: Customer saved
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /pricing:
     get:
+      operationId: get_pricing
       summary: List pricing entries
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -744,7 +849,14 @@ paths:
       responses:
         "200":
           description: Price entries
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
+      operationId: post_pricing
       summary: Create or update pricing entry
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -752,8 +864,15 @@ paths:
       responses:
         "201":
           description: Pricing entry saved
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /pricing/tax-classes:
     get:
+      operationId: get_pricing_tax_classes
       summary: List tax classes
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -761,7 +880,14 @@ paths:
       responses:
         "200":
           description: Tax classes list
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
+      operationId: post_pricing_tax_classes
       summary: Create or update tax class
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -769,8 +895,15 @@ paths:
       responses:
         "201":
           description: Tax class saved
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /pricing/tax-rates:
     get:
+      operationId: get_pricing_tax_rates
       summary: List tax rates
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -778,7 +911,14 @@ paths:
       responses:
         "200":
           description: Tax rates list
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
+      operationId: post_pricing_tax_rates
       summary: Create or update tax rate
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -786,8 +926,15 @@ paths:
       responses:
         "201":
           description: Tax rate saved
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /pricing/calculate:
     post:
+      operationId: post_pricing_calculate
       summary: Calculate deterministic price with discount and tax
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -805,8 +952,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PricingCalculationResult"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /inventory:
     get:
+      operationId: get_inventory
       summary: List inventory
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -814,7 +968,14 @@ paths:
       responses:
         "200":
           description: Inventory list
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
+      operationId: post_inventory
       summary: Create or update inventory item
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -822,8 +983,15 @@ paths:
       responses:
         "201":
           description: Inventory item saved
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /promotions:
     get:
+      operationId: get_promotions
       summary: List promotions
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -831,7 +999,14 @@ paths:
       responses:
         "200":
           description: Promotions list
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
+      operationId: post_promotions
       summary: Create or update promotion
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -839,8 +1014,15 @@ paths:
       responses:
         "201":
           description: Promotion saved
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /promotions/rules:
     get:
+      operationId: get_promotions_rules
       summary: List promotion rules
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -848,7 +1030,14 @@ paths:
       responses:
         "200":
           description: Promotion rules list
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
+      operationId: post_promotions_rules
       summary: Create or update promotion rule
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -856,8 +1045,15 @@ paths:
       responses:
         "201":
           description: Promotion rule saved
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /promotions/vouchers:
     get:
+      operationId: get_promotions_vouchers
       summary: List vouchers
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -865,7 +1061,14 @@ paths:
       responses:
         "200":
           description: Vouchers list
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
+      operationId: post_promotions_vouchers
       summary: Create or update voucher
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -873,8 +1076,15 @@ paths:
       responses:
         "201":
           description: Voucher saved
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /regions:
     get:
+      operationId: get_regions
       summary: List regions
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -882,7 +1092,14 @@ paths:
       responses:
         "200":
           description: Regions list
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
+      operationId: post_regions
       summary: Create or update region
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -890,8 +1107,15 @@ paths:
       responses:
         "201":
           description: Region saved
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /brands:
     get:
+      operationId: get_brands
       summary: List brands
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -899,7 +1123,14 @@ paths:
       responses:
         "200":
           description: Brand list
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
+      operationId: post_brands
       summary: Create or update brand
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -907,8 +1138,15 @@ paths:
       responses:
         "201":
           description: Brand saved
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /payments:
     get:
+      operationId: get_payments
       summary: List payments
       security:
         - ApiTokenAuth: []
@@ -919,7 +1157,14 @@ paths:
       responses:
         "200":
           description: Payment list
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
+      operationId: post_payments
       summary: Create or update payment
       security:
         - ApiTokenAuth: []
@@ -932,8 +1177,15 @@ paths:
       responses:
         "201":
           description: Payment saved
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /payments/reconcile:
     get:
+      operationId: get_payments_reconcile
       summary: Reconcile payment ledger totals against payment status
       security:
         - ApiTokenAuth: []
@@ -944,8 +1196,15 @@ paths:
       responses:
         "200":
           description: Reconciliation report
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /payments/disputes:
     get:
+      operationId: get_payments_disputes
       summary: List payment disputes
       security:
         - ApiTokenAuth: []
@@ -956,7 +1215,14 @@ paths:
       responses:
         "200":
           description: Disputes list
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
+      operationId: post_payments_disputes
       summary: Upsert payment dispute case
       security:
         - ApiTokenAuth: []
@@ -967,8 +1233,15 @@ paths:
       responses:
         "201":
           description: Dispute saved
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /payments/{id}:
     get:
+      operationId: get_payments_by_id
       summary: Get payment by id
       security:
         - ApiTokenAuth: []
@@ -985,8 +1258,15 @@ paths:
       responses:
         "200":
           description: Payment
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /payments/{id}/transactions:
     get:
+      operationId: get_payments_by_id_transactions
       summary: List payment transactions
       security:
         - ApiTokenAuth: []
@@ -1003,8 +1283,15 @@ paths:
       responses:
         "200":
           description: Transactions
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /payments/{id}/capture:
     post:
+      operationId: post_payments_by_id_capture
       summary: Capture authorized funds
       security:
         - ApiTokenAuth: []
@@ -1022,8 +1309,15 @@ paths:
       responses:
         "200":
           description: Capture result
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /payments/{id}/refund:
     post:
+      operationId: post_payments_by_id_refund
       summary: Refund captured funds
       security:
         - ApiTokenAuth: []
@@ -1041,8 +1335,15 @@ paths:
       responses:
         "200":
           description: Refund result
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /payments/{id}/void:
     post:
+      operationId: post_payments_by_id_void
       summary: Void authorization before capture
       security:
         - ApiTokenAuth: []
@@ -1060,8 +1361,15 @@ paths:
       responses:
         "200":
           description: Void result
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /webhooks/payments/{tenant_id}/{provider}:
     post:
+      operationId: post_webhooks_payments_by_tenant_id_by_provider
       summary: Provider payment webhook (HMAC-signed when WEBHOOK_PAYMENT_SECRET is set)
       parameters:
         - name: tenant_id
@@ -1078,8 +1386,15 @@ paths:
       responses:
         "200":
           description: Webhook processed
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /shipping/zones:
     get:
+      operationId: get_shipping_zones
       summary: List shipping zones
       security:
         - ApiTokenAuth: []
@@ -1091,7 +1406,14 @@ paths:
       responses:
         "200":
           description: Zones list
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
+      operationId: post_shipping_zones
       summary: Create or update shipping zone
       security:
         - ApiTokenAuth: []
@@ -1103,8 +1425,15 @@ paths:
       responses:
         "201":
           description: Zone saved
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /shipping/resolve:
     post:
+      operationId: post_shipping_resolve
       summary: Resolve eligible shipping methods for country, channel, postal prefix, and order total
       security:
         - ApiTokenAuth: []
@@ -1116,8 +1445,15 @@ paths:
       responses:
         "200":
           description: Eligible methods
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /shipping/methods:
     get:
+      operationId: get_shipping_methods
       summary: List shipping methods
       security:
         - ApiTokenAuth: []
@@ -1129,7 +1465,14 @@ paths:
       responses:
         "200":
           description: Shipping method list
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
+      operationId: post_shipping_methods
       summary: Create or update shipping method
       security:
         - ApiTokenAuth: []
@@ -1141,8 +1484,15 @@ paths:
       responses:
         "201":
           description: Shipping method saved
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /identity/users:
     get:
+      operationId: get_identity_users
       summary: List users
       security:
         - ApiTokenAuth: []
@@ -1153,7 +1503,14 @@ paths:
       responses:
         "200":
           description: Users list
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
+      operationId: post_identity_users
       summary: Create or update user
       security:
         - ApiTokenAuth: []
@@ -1164,8 +1521,15 @@ paths:
       responses:
         "201":
           description: User saved
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /identity/auth/login:
     post:
+      operationId: post_identity_auth_login
       summary: Login and issue signed user JWT
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -1173,8 +1537,15 @@ paths:
       responses:
         "200":
           description: Login success with token
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /identity/auth/refresh:
     post:
+      operationId: post_identity_auth_refresh
       summary: Rotate refresh token and issue a new signed user JWT (replay-safe)
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -1182,8 +1553,15 @@ paths:
       responses:
         "200":
           description: Refresh success with rotated refresh token
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /identity/auth/logout:
     post:
+      operationId: post_identity_auth_logout
       summary: Revoke active refresh token session (by refresh token hash)
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -1191,8 +1569,15 @@ paths:
       responses:
         "200":
           description: Logout success
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /identity/auth/sessions:
     get:
+      operationId: get_identity_auth_sessions
       summary: List auth sessions for current user JWT subject
       security:
         - ApiTokenAuth: []
@@ -1203,8 +1588,15 @@ paths:
       responses:
         "200":
           description: Session list
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /identity/auth/sessions/{session_id}/revoke:
     post:
+      operationId: post_identity_auth_sessions_by_session_id_revoke
       summary: Revoke a specific auth session for current user JWT subject
       security:
         - ApiTokenAuth: []
@@ -1220,8 +1612,15 @@ paths:
       responses:
         "200":
           description: Session revoked
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /identity/auth/sessions/revoke-others:
     post:
+      operationId: post_identity_auth_sessions_revoke_others
       summary: Revoke all other sessions except current refresh-token session
       security:
         - ApiTokenAuth: []
@@ -1232,8 +1631,15 @@ paths:
       responses:
         "200":
           description: Other sessions revoked
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /translations:
     post:
+      operationId: post_translations
       summary: Upsert translation
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -1241,8 +1647,15 @@ paths:
       responses:
         "201":
           description: Translation saved
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /metadata:
     post:
+      operationId: post_metadata
       summary: Upsert metadata entry
       security:
         - ApiTokenAuth: []
@@ -1253,8 +1666,15 @@ paths:
       responses:
         "201":
           description: Metadata saved
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /search/index:
     post:
+      operationId: post_search_index
       summary: Index search document
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -1262,3 +1682,9 @@ paths:
       responses:
         "201":
           description: Search document indexed
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"

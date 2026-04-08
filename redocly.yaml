@@ -1,0 +1,6 @@
+extends:
+  - recommended
+
+rules:
+  # Keep future/planned shared schemas without forcing immediate path usage.
+  no-unused-components: off
