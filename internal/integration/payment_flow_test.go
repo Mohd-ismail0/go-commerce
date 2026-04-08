@@ -2,8 +2,10 @@ package integration
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"rewrite/internal/modules/payments"
 	"rewrite/internal/shared/db"
@@ -28,7 +30,7 @@ func TestPaymentCaptureLifecycle(t *testing.T) {
 	repo := payments.NewRepository(conn)
 	svc := payments.NewService(repo)
 
-	const payID = "pay_integration_test"
+	payID := fmt.Sprintf("pay_integration_test_%d", time.Now().UnixNano())
 	const tenant = "public"
 	const region = "global"
 

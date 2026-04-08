@@ -165,6 +165,35 @@ CREATE TABLE IF NOT EXISTS promotions (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS payments (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  region_id TEXT NOT NULL,
+  order_id TEXT REFERENCES orders(id) ON DELETE CASCADE,
+  checkout_id TEXT,
+  provider TEXT NOT NULL,
+  status TEXT NOT NULL,
+  amount_cents BIGINT NOT NULL,
+  currency TEXT NOT NULL,
+  external_reference TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS payment_transactions (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  region_id TEXT NOT NULL,
+  payment_id TEXT NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
+  event_type TEXT NOT NULL,
+  amount_cents BIGINT NOT NULL,
+  currency TEXT NOT NULL,
+  success BOOLEAN NOT NULL,
+  raw_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  provider_event_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS translations (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL,
@@ -209,3 +238,7 @@ ON translations (tenant_id, region_id, entity_type, language_code, entity_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_idem_tenant_scope_key
 ON idempotency_keys (tenant_id, scope, idempotency_key);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_payment_transactions_provider_event
+ON payment_transactions (tenant_id, provider_event_id)
+WHERE provider_event_id IS NOT NULL AND btrim(provider_event_id) <> '';

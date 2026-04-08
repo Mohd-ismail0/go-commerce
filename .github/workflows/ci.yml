@@ -15,6 +15,20 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rewrite
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d rewrite"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
     strategy:
       matrix:
         go-version: ["1.26.x"]
@@ -24,6 +38,8 @@ jobs:
       REDOCLY_CLI_VERSION: 2.25.3
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
@@ -44,16 +60,11 @@ jobs:
         run: make test
       - name: Integration tests (Postgres)
         run: |
-          docker run -d --name pg-ci -p 5432:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=rewrite postgres:16
-          trap 'docker rm -f pg-ci' EXIT
-          for i in $(seq 1 30); do
-            docker exec pg-ci pg_isready -U postgres -d rewrite && break
-            sleep 1
-          done
-          export DATABASE_URL="postgres://postgres:postgres@localhost:5432/rewrite?sslmode=disable"
-          docker exec -i pg-ci psql "postgres://postgres:postgres@localhost:5432/rewrite?sslmode=disable" -v ON_ERROR_STOP=1 < internal/shared/db/schema.sql
-          export RUN_INTEGRATION=1
-          go test ./internal/integration/... -count=1
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client
+          export DATABASE_URL="postgres://postgres:postgres@127.0.0.1:55432/rewrite?sslmode=disable"
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f internal/shared/db/schema.sql
+          RUN_INTEGRATION=1 DATABASE_URL="$DATABASE_URL" go test ./internal/integration/... -count=1
         shell: bash
       - name: Build
         run: make build

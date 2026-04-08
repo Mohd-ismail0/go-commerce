@@ -90,6 +90,35 @@ type OrderStatusAudit struct {
 	ChangedAt      time.Time
 }
 
+type Payment struct {
+	ID                string
+	TenantID          string
+	RegionID          string
+	OrderID           sql.NullString
+	CheckoutID        sql.NullString
+	Provider          string
+	Status            string
+	AmountCents       int64
+	Currency          string
+	ExternalReference sql.NullString
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
+type PaymentTransaction struct {
+	ID              string
+	TenantID        string
+	RegionID        string
+	PaymentID       string
+	EventType       string
+	AmountCents     int64
+	Currency        string
+	Success         bool
+	RawPayload      json.RawMessage
+	ProviderEventID sql.NullString
+	CreatedAt       time.Time
+}
+
 type PriceBookEntry struct {
 	ID          string
 	TenantID    string

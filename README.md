@@ -20,10 +20,26 @@ make migrate
 4. Quality checks:
 
 ```bash
-make openapi-check
-make sqlc-check
-make test
+make check
+make integration-test
 make build
+```
+
+If `make` is unavailable (for example, default Windows PowerShell), run equivalents directly:
+
+```bash
+go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0 generate
+go test ./...
+go vet ./...
+go build ./...
+```
+
+PowerShell helper scripts are also available:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/sqlc-generate.ps1
+powershell -ExecutionPolicy Bypass -File scripts/openapi-validate.ps1
+powershell -ExecutionPolicy Bypass -File scripts/integration-test.ps1
 ```
 
 ## Reliability notes
@@ -52,6 +68,13 @@ You can override script versions per run, for example:
 SQLC_VERSION=1.30.0 make sqlc-generate
 REDOCLY_CLI_VERSION=2.25.3 make openapi-check
 ```
+
+## Integration tests
+
+- Integration tests are opt-in and require Postgres.
+- `make integration-test` starts a temporary Postgres container, applies `internal/shared/db/schema.sql`, runs `./internal/integration/...`, and cleans up the container.
+- On Windows PowerShell, use `scripts/integration-test.ps1` for the same flow.
+- For manual runs, set `RUN_INTEGRATION=1` and a valid `DATABASE_URL`.
 
 ## Rollback guidance
 

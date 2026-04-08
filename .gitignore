@@ -1,0 +1,14 @@
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+bin/
+dist/
+coverage.out
+*.test
+*.exe
+
+# IDE and OS
+.DS_Store
+Thumbs.db

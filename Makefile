@@ -3,7 +3,7 @@ SHELL := /usr/bin/env bash
 SQLC_VERSION ?= 1.30.0
 REDOCLY_CLI_VERSION ?= 2.25.3
 
-.PHONY: sqlc-generate sqlc-check openapi-check test build lint vet vuln docker-build up down migrate
+.PHONY: sqlc-generate sqlc-check openapi-check test integration-test check build lint vet vuln docker-build up down migrate
 
 sqlc-generate:
 	SQLC_VERSION=$(SQLC_VERSION) bash scripts/sqlc-generate.sh
@@ -17,6 +17,11 @@ openapi-check:
 
 test:
 	go test ./...
+
+integration-test:
+	bash scripts/integration-test.sh
+
+check: openapi-check sqlc-check vet lint test
 
 build:
 	go build ./...
