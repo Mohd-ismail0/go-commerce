@@ -39,6 +39,20 @@ make build
 - Refresh-token replay detection revokes compromised sessions when a previously-rotated token is reused.
 - Identity sessions now support listing/revocation APIs and optional device binding on refresh to reduce token theft blast radius.
 
+## Toolchain pins
+
+- Go: `1.26.x` (CI), `go 1.26.0` (`go.mod`)
+- sqlc: `1.30.0` (`SQLC_VERSION`)
+- golangci-lint: `2.11.4` (`GOLANGCI_LINT_VERSION`)
+- Redocly CLI: `2.25.3` (`REDOCLY_CLI_VERSION`)
+
+You can override script versions per run, for example:
+
+```bash
+SQLC_VERSION=1.30.0 make sqlc-generate
+REDOCLY_CLI_VERSION=2.25.3 make openapi-check
+```
+
 ## Rollback guidance
 
 - Prefer forward-fix migrations.

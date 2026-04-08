@@ -1,16 +1,19 @@
-SHELL := /bin/sh
+SHELL := /usr/bin/env bash
+
+SQLC_VERSION ?= 1.30.0
+REDOCLY_CLI_VERSION ?= 2.25.3
 
 .PHONY: sqlc-generate sqlc-check openapi-check test build lint vet vuln docker-build up down migrate
 
 sqlc-generate:
-	sh scripts/sqlc-generate.sh
+	SQLC_VERSION=$(SQLC_VERSION) bash scripts/sqlc-generate.sh
 
 sqlc-check:
-	sh scripts/sqlc-generate.sh
+	SQLC_VERSION=$(SQLC_VERSION) bash scripts/sqlc-generate.sh
 	git diff --exit-code -- internal/shared/db/sqlc
 
 openapi-check:
-	sh scripts/openapi-validate.sh
+	REDOCLY_CLI_VERSION=$(REDOCLY_CLI_VERSION) bash scripts/openapi-validate.sh
 
 test:
 	go test ./...
