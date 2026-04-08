@@ -9,6 +9,7 @@ import (
 type fakeRepo struct {
 	used  int64
 	limit int64
+	rules []PromotionRule
 }
 
 func (f *fakeRepo) Save(item Promotion) Promotion { return item }
@@ -16,12 +17,15 @@ func (f *fakeRepo) List(_ string) []Promotion     { return nil }
 func (f *fakeRepo) SaveRule(item PromotionRule) PromotionRule {
 	return item
 }
-func (f *fakeRepo) ListRules(_ string) []PromotionRule { return nil }
+func (f *fakeRepo) ListRules(_ string) []PromotionRule { return f.rules }
 func (f *fakeRepo) SaveVoucher(item Voucher) Voucher {
 	return item
 }
 func (f *fakeRepo) ListVouchers(_ string) []Voucher { return nil }
-func (f *fakeRepo) GetPromotionByID(_, _, _ string) (Promotion, bool) {
+func (f *fakeRepo) GetPromotionByID(id, tenantID, regionID string) (Promotion, bool) {
+	if id == "promo_1" && tenantID == "tenant_a" && regionID == "region_a" {
+		return Promotion{ID: "promo_1", TenantID: tenantID, RegionID: regionID, ValueCents: 50}, true
+	}
 	return Promotion{}, false
 }
 func (f *fakeRepo) FindEligibleVoucher(tenantID, regionID, code, currency string, at time.Time) (Voucher, bool) {
@@ -60,6 +64,25 @@ func TestResolveDiscountDoesNotConsumeVoucher(t *testing.T) {
 	}
 	if second != 100 {
 		t.Fatalf("expected second discount preview to stay deterministic, got %d", second)
+	}
+}
+
+func TestResolveDiscountUsesBestPromotionRule(t *testing.T) {
+	svc := NewService(&fakeRepo{
+		rules: []PromotionRule{
+			{ID: "r1", TenantID: "tenant_a", RegionID: "region_a", PromotionID: "promo_1", RuleType: "fixed", ValueCents: 120, Currency: "USD"},
+			{ID: "r2", TenantID: "tenant_a", RegionID: "region_a", PromotionID: "promo_1", RuleType: "percentage", ValueCents: 20, Currency: "USD"},
+		},
+	})
+	discount := svc.ResolveDiscount(context.Background(), EligibilityInput{
+		TenantID:    "tenant_a",
+		RegionID:    "region_a",
+		Currency:    "USD",
+		BaseAmount:  1000,
+		PromotionID: "promo_1",
+	})
+	if discount != 200 {
+		t.Fatalf("expected best rule discount 200, got %d", discount)
 	}
 }
 

@@ -62,7 +62,7 @@ func (s *Service) ResolveDiscount(_ context.Context, input EligibilityInput) int
 	}
 	if strings.TrimSpace(input.PromotionID) != "" {
 		if promo, ok := s.repo.GetPromotionByID(input.PromotionID, input.TenantID, input.RegionID); ok {
-			return clampDiscount(input.BaseAmount, promo.ValueCents)
+			return s.resolvePromotionDiscount(input, promo)
 		}
 	}
 	return 0
@@ -100,5 +100,32 @@ func voucherDiscount(base int64, discountType string, value int64) int64 {
 		return clampDiscount(base, (base*value)/100)
 	default:
 		return clampDiscount(base, value)
+	}
+}
+
+func (s *Service) resolvePromotionDiscount(input EligibilityInput, promo Promotion) int64 {
+	best := clampDiscount(input.BaseAmount, promo.ValueCents)
+	rules := s.repo.ListRules(input.TenantID)
+	for _, rule := range rules {
+		if rule.PromotionID != promo.ID || !strings.EqualFold(strings.TrimSpace(rule.RegionID), strings.TrimSpace(input.RegionID)) {
+			continue
+		}
+		if rule.Currency != "" && !strings.EqualFold(strings.TrimSpace(rule.Currency), strings.TrimSpace(input.Currency)) {
+			continue
+		}
+		candidate := promotionRuleDiscount(input.BaseAmount, rule)
+		if candidate > best {
+			best = candidate
+		}
+	}
+	return best
+}
+
+func promotionRuleDiscount(base int64, rule PromotionRule) int64 {
+	switch strings.ToLower(strings.TrimSpace(rule.RuleType)) {
+	case "percentage", "percent":
+		return clampDiscount(base, (base*rule.ValueCents)/100)
+	default:
+		return clampDiscount(base, rule.ValueCents)
 	}
 }
