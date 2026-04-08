@@ -45,15 +45,13 @@ jobs:
       - name: Integration tests (Postgres)
         run: |
           docker run -d --name pg-ci -p 5432:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=rewrite postgres:16
+          trap 'docker rm -f pg-ci' EXIT
           for i in $(seq 1 30); do
             docker exec pg-ci pg_isready -U postgres -d rewrite && break
             sleep 1
           done
           export DATABASE_URL="postgres://postgres:postgres@localhost:5432/rewrite?sslmode=disable"
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f internal/shared/db/schema.sql
-          for f in internal/shared/db/migrations/*.sql; do
-            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
-          done
+          docker exec -i pg-ci psql "postgres://postgres:postgres@localhost:5432/rewrite?sslmode=disable" -v ON_ERROR_STOP=1 < internal/shared/db/schema.sql
           export RUN_INTEGRATION=1
           go test ./internal/integration/... -count=1
         shell: bash

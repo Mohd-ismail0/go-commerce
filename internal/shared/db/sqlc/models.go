@@ -6,6 +6,7 @@ package sqlc
 
 import (
 	"database/sql"
+	"encoding/json"
 	"time"
 
 	"github.com/sqlc-dev/pqtype"
@@ -172,6 +173,18 @@ type StockItem struct {
 	Quantity  int64
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+type Translation struct {
+	ID           string
+	TenantID     string
+	RegionID     string
+	EntityType   string
+	EntityID     string
+	LanguageCode string
+	Fields       json.RawMessage
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 type WebhookEndpoint struct {
