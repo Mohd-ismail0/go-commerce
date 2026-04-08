@@ -14,6 +14,7 @@ type Order struct {
 	PromotionID string `json:"promotion_id,omitempty"`
 	TaxClassID  string `json:"tax_class_id,omitempty"`
 	CountryCode string `json:"country_code,omitempty"`
+	CreatedAt   string `json:"created_at,omitempty"`
 	UpdatedAt   string `json:"updated_at,omitempty"`
 }
 

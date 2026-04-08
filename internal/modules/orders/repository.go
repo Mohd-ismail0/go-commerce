@@ -304,6 +304,7 @@ func mapOrder(row dbsqlc.Order) Order {
 		Status:     row.Status,
 		TotalCents: row.TotalCents,
 		Currency:   row.Currency,
+		CreatedAt:  row.CreatedAt.UTC().Format(time.RFC3339Nano),
 		UpdatedAt:  row.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
 }
