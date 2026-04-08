@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -108,7 +109,17 @@ func (s *Service) AssignProductToCollection(ctx context.Context, tenantID, regio
 	if strings.TrimSpace(collectionID) == "" || strings.TrimSpace(productID) == "" {
 		return sharederrors.BadRequest("collection_id and product_id are required")
 	}
-	return s.repo.AssignProductToCollection(ctx, tenantID, regionID, collectionID, productID)
+	err := s.repo.AssignProductToCollection(ctx, tenantID, regionID, collectionID, productID)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, ErrAssignEntityNotFound) {
+		return sharederrors.NotFound(err.Error())
+	}
+	if errors.Is(err, ErrCollectionProductAlreadyAssigned) {
+		return sharederrors.Conflict(err.Error())
+	}
+	return sharederrors.Internal("failed to assign product to collection")
 }
 
 func (s *Service) SaveProductMedia(ctx context.Context, media ProductMedia) (ProductMedia, error) {

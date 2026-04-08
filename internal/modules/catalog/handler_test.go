@@ -22,6 +22,7 @@ type catalogFakeRepo struct {
 	collections        []Collection
 	collectionProducts map[string]map[string]bool
 	media              []ProductMedia
+	assignErr          error
 }
 
 func TestProductsCreateRequiresIdempotencyKey(t *testing.T) {
@@ -117,6 +118,9 @@ func (r *catalogFakeRepo) ListCollections(_ context.Context, tenantID, regionID 
 }
 
 func (r *catalogFakeRepo) AssignProductToCollection(_ context.Context, _, _, collectionID, productID string) error {
+	if r.assignErr != nil {
+		return r.assignErr
+	}
 	if r.collectionProducts == nil {
 		r.collectionProducts = map[string]map[string]bool{}
 	}
@@ -227,6 +231,38 @@ func TestAssignProductToCollectionEndpoint(t *testing.T) {
 	}
 	if repo.collectionProducts == nil || !repo.collectionProducts["c1"]["p1"] {
 		t.Fatalf("expected product to be assigned to collection")
+	}
+}
+
+func TestAssignProductToCollectionReturnsNotFound(t *testing.T) {
+	repo := &catalogFakeRepo{assignErr: ErrAssignEntityNotFound}
+	h := NewHandler(NewService(repo, events.NewBus()))
+	r := chi.NewRouter()
+	r.Use(middleware.TenantRegion("public", "global"))
+	h.RegisterRoutes(r)
+	req := httptest.NewRequest(http.MethodPost, "/collections/c1/products/p1", nil)
+	req.Header.Set("X-Tenant-ID", "tenant_a")
+	req.Header.Set("X-Region-ID", "global")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rr.Code)
+	}
+}
+
+func TestAssignProductToCollectionReturnsConflictOnDuplicate(t *testing.T) {
+	repo := &catalogFakeRepo{assignErr: ErrCollectionProductAlreadyAssigned}
+	h := NewHandler(NewService(repo, events.NewBus()))
+	r := chi.NewRouter()
+	r.Use(middleware.TenantRegion("public", "global"))
+	h.RegisterRoutes(r)
+	req := httptest.NewRequest(http.MethodPost, "/collections/c1/products/p1", nil)
+	req.Header.Set("X-Tenant-ID", "tenant_a")
+	req.Header.Set("X-Region-ID", "global")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", rr.Code)
 	}
 }
 

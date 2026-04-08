@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 
 	dbsqlc "rewrite/internal/shared/db/sqlc"
@@ -24,12 +25,16 @@ type Repository interface {
 }
 
 type PostgresRepository struct {
+	db      *sql.DB
 	queries *dbsqlc.Queries
 }
 
 func NewRepository(conn *sql.DB) Repository {
-	return &PostgresRepository{queries: dbsqlc.New(conn)}
+	return &PostgresRepository{db: conn, queries: dbsqlc.New(conn)}
 }
+
+var ErrAssignEntityNotFound = errors.New("collection or product not found in tenant/region")
+var ErrCollectionProductAlreadyAssigned = errors.New("product already assigned to collection")
 
 func (r *PostgresRepository) Upsert(ctx context.Context, product Product, idempotencyKey string) (Product, error) {
 	if idempotencyKey != "" {
@@ -248,12 +253,40 @@ func (r *PostgresRepository) ListCollections(ctx context.Context, tenantID, regi
 }
 
 func (r *PostgresRepository) AssignProductToCollection(ctx context.Context, tenantID, regionID, collectionID, productID string) error {
-	return r.queries.AssignProductToCollection(ctx, dbsqlc.AssignProductToCollectionParams{
-		TenantID:     tenantID,
-		RegionID:     regionID,
-		CollectionID: collectionID,
-		ProductID:    productID,
-	})
+	var collectionExists bool
+	if err := r.db.QueryRowContext(ctx, `
+SELECT EXISTS(
+  SELECT 1 FROM collections
+  WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+)
+`, collectionID, tenantID, regionID).Scan(&collectionExists); err != nil {
+		return err
+	}
+	var productExists bool
+	if err := r.db.QueryRowContext(ctx, `
+SELECT EXISTS(
+  SELECT 1 FROM products
+  WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+)
+`, productID, tenantID, regionID).Scan(&productExists); err != nil {
+		return err
+	}
+	if !collectionExists || !productExists {
+		return ErrAssignEntityNotFound
+	}
+	res, err := r.db.ExecContext(ctx, `
+INSERT INTO collection_products (collection_id, product_id)
+VALUES ($1, $2)
+ON CONFLICT (collection_id, product_id) DO NOTHING
+`, collectionID, productID)
+	if err != nil {
+		return err
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return ErrCollectionProductAlreadyAssigned
+	}
+	return nil
 }
 
 func (r *PostgresRepository) InsertProductMedia(ctx context.Context, media ProductMedia) (ProductMedia, error) {
