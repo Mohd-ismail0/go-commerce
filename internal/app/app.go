@@ -61,6 +61,15 @@ func New(ctx context.Context) (*App, error) {
 	events.NewWorker(outbox, webhooks).Start(appCtx)
 	promotionsSvc := promotions.NewService(promotions.NewRepository(conn))
 	pricingSvc := pricing.NewService(pricing.NewRepository(conn), promotionsSvc)
+	paymentSvc := payments.NewService(payments.NewRepository(conn))
+	payments.StartReconciliationWorker(
+		appCtx,
+		paymentSvc,
+		bus,
+		cfg.DefaultTenantID,
+		cfg.DefaultRegionID,
+		time.Duration(cfg.PaymentReconcileIntervalSeconds)*time.Second,
+	)
 	jwtKeys := parseJWTKeys(cfg.AuthJWTSecret, cfg.AuthJWTKeyset)
 
 	s := server.New(
@@ -92,7 +101,7 @@ func New(ctx context.Context) (*App, error) {
 		promotions.NewHandler(promotionsSvc),
 		regions.NewHandler(regions.NewService(regions.NewRepository(conn))),
 		brands.NewHandler(brands.NewService(brands.NewRepository(conn))),
-		payments.NewHandler(payments.NewService(payments.NewRepository(conn)), cfg.WebhookPaymentSecret, cfg.AppEnv),
+		payments.NewHandler(paymentSvc, cfg.WebhookPaymentSecret, cfg.AppEnv),
 		shipping.NewHandler(shipping.NewService(shipping.NewRepository(conn))),
 		identity.NewHandler(identity.NewService(identity.NewRepository(conn), cfg.AuthJWTSecret, cfg.AuthJWTKeyset, cfg.AuthJWTTTLMinutes, cfg.AuthRefreshTTLMinutes)),
 		localization.NewHandler(localization.NewService(localization.NewRepository(conn))),

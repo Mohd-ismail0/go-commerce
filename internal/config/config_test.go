@@ -92,3 +92,15 @@ func TestLoadAuthJWTKeyset(t *testing.T) {
 		t.Fatalf("unexpected keyset: %s", cfg.AuthJWTKeyset)
 	}
 }
+
+func TestLoadParsesPaymentReconcileInterval(t *testing.T) {
+	t.Setenv("APP_ENV", "test")
+	t.Setenv("PAYMENT_RECONCILE_INTERVAL_SECONDS", "600")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.PaymentReconcileIntervalSeconds != 600 {
+		t.Fatalf("expected PaymentReconcileIntervalSeconds=600, got %d", cfg.PaymentReconcileIntervalSeconds)
+	}
+}

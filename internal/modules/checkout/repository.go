@@ -11,6 +11,7 @@ import (
 var ErrSessionNotFound = errors.New("checkout session not found")
 var ErrSessionNotOpen = errors.New("checkout session is not open")
 var ErrCheckoutEmpty = errors.New("checkout has no lines")
+var ErrInsufficientStock = errors.New("insufficient stock for checkout line")
 
 type Repository interface {
 	CreateSession(ctx context.Context, in Session) (Session, error)
@@ -125,6 +126,39 @@ WHERE checkout_id = $1 AND tenant_id = $2 AND region_id = $3
 	}
 	if err = lines.Err(); err != nil {
 		return OrderCreatedPayload{}, err
+	}
+
+	// Wave 1 invariant: reserve stock atomically during checkout completion.
+	requiredByProduct := map[string]int64{}
+	for _, l := range collected {
+		if l.ProductID != "" {
+			requiredByProduct[l.ProductID] += l.Quantity
+		}
+	}
+	for productID, required := range requiredByProduct {
+		var available int64
+		row := tx.QueryRowContext(ctx, `
+SELECT quantity
+FROM stock_items
+WHERE tenant_id = $1 AND region_id = $2 AND product_id = $3
+FOR UPDATE
+`, tenantID, regionID, productID)
+		if scanErr := row.Scan(&available); scanErr != nil {
+			if errors.Is(scanErr, sql.ErrNoRows) {
+				return OrderCreatedPayload{}, ErrInsufficientStock
+			}
+			return OrderCreatedPayload{}, scanErr
+		}
+		if available < required {
+			return OrderCreatedPayload{}, ErrInsufficientStock
+		}
+		if _, err = tx.ExecContext(ctx, `
+UPDATE stock_items
+SET quantity = quantity - $4, updated_at = NOW()
+WHERE tenant_id = $1 AND region_id = $2 AND product_id = $3
+`, tenantID, regionID, productID, required); err != nil {
+			return OrderCreatedPayload{}, err
+		}
 	}
 
 	if _, err = tx.ExecContext(ctx, `

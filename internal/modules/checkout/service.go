@@ -67,6 +67,9 @@ func (s *Service) Complete(ctx context.Context, tenantID, regionID, checkoutID s
 		if errors.Is(err, ErrSessionNotOpen) || errors.Is(err, ErrCheckoutEmpty) {
 			return CompleteResult{}, sharederrors.BadRequest(err.Error())
 		}
+		if errors.Is(err, ErrInsufficientStock) {
+			return CompleteResult{}, sharederrors.Conflict(err.Error())
+		}
 		return CompleteResult{}, sharederrors.Internal("failed to complete checkout")
 	}
 	s.bus.Publish(ctx, events.EventOrderCreated, saved)

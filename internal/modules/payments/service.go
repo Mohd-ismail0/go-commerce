@@ -12,11 +12,21 @@ import (
 )
 
 type Service struct {
-	repo *Repository
+	repo      *Repository
+	providers map[string]ProviderAdapter
 }
 
-func NewService(repo *Repository) *Service {
-	return &Service{repo: repo}
+func NewService(repo *Repository, adapters ...ProviderAdapter) *Service {
+	providers := map[string]ProviderAdapter{
+		"default": passThroughProvider{},
+	}
+	for _, a := range adapters {
+		if a == nil {
+			continue
+		}
+		providers[normalizeProviderName(a.Name())] = a
+	}
+	return &Service{repo: repo, providers: providers}
 }
 
 func (s *Service) Save(ctx context.Context, item Payment, idempotencyKey string) (Payment, error) {
@@ -25,6 +35,10 @@ func (s *Service) Save(ctx context.Context, item Payment, idempotencyKey string)
 	}
 	if item.Status == "" {
 		item.Status = StatusAuthorized
+	}
+	provider, err := s.providerFor(item.Provider)
+	if err != nil {
+		return Payment{}, err
 	}
 	if idempotencyKey != "" {
 		scope := "payments.upsert"
@@ -38,6 +52,13 @@ func (s *Service) Save(ctx context.Context, item Payment, idempotencyKey string)
 	}
 	if item.ID == "" {
 		item.ID = utils.NewID("pay")
+	}
+	if item.ExternalReference == "" {
+		authResult, authErr := provider.Authorize(ctx, item, item.AmountCents)
+		if authErr != nil || !authResult.Success {
+			return Payment{}, sharederrors.Conflict("payment provider authorization failed")
+		}
+		item.ExternalReference = authResult.ExternalReference
 	}
 	saved, err := s.repo.Save(ctx, item)
 	if err != nil {
@@ -118,7 +139,18 @@ func (s *Service) Capture(ctx context.Context, tenantID, paymentID string, in Am
 		AmountCents: amount,
 		Currency:    p.Currency,
 		Success:     true,
-		RawPayload:  map[string]any{"op": "capture"},
+		RawPayload:  map[string]any{"op": "capture", "provider": p.Provider},
+	}
+	provider, perr := s.providerFor(p.Provider)
+	if perr != nil {
+		return ActionResult{}, perr
+	}
+	provRes, captureErr := provider.Capture(ctx, p, amount)
+	if captureErr != nil || !provRes.Success {
+		return ActionResult{}, sharederrors.Conflict("payment provider capture failed")
+	}
+	if provRes.RawPayload != nil {
+		tx.RawPayload = provRes.RawPayload
 	}
 	savedTx, err := s.repo.InsertTransaction(ctx, tx)
 	if err != nil {
@@ -184,7 +216,18 @@ func (s *Service) Refund(ctx context.Context, tenantID, paymentID string, in Amo
 		AmountCents: amount,
 		Currency:    p.Currency,
 		Success:     true,
-		RawPayload:  map[string]any{"op": "refund"},
+		RawPayload:  map[string]any{"op": "refund", "provider": p.Provider},
+	}
+	provider, perr := s.providerFor(p.Provider)
+	if perr != nil {
+		return ActionResult{}, perr
+	}
+	provRes, refundErr := provider.Refund(ctx, p, amount)
+	if refundErr != nil || !provRes.Success {
+		return ActionResult{}, sharederrors.Conflict("payment provider refund failed")
+	}
+	if provRes.RawPayload != nil {
+		tx.RawPayload = provRes.RawPayload
 	}
 	savedTx, err := s.repo.InsertTransaction(ctx, tx)
 	if err != nil {
@@ -242,7 +285,18 @@ func (s *Service) Void(ctx context.Context, tenantID, paymentID string, idempote
 		AmountCents: p.AmountCents,
 		Currency:    p.Currency,
 		Success:     true,
-		RawPayload:  map[string]any{"op": "void"},
+		RawPayload:  map[string]any{"op": "void", "provider": p.Provider},
+	}
+	provider, perr := s.providerFor(p.Provider)
+	if perr != nil {
+		return ActionResult{}, perr
+	}
+	provRes, voidErr := provider.Void(ctx, p)
+	if voidErr != nil || !provRes.Success {
+		return ActionResult{}, sharederrors.Conflict("payment provider void failed")
+	}
+	if provRes.RawPayload != nil {
+		tx.RawPayload = provRes.RawPayload
 	}
 	savedTx, err := s.repo.InsertTransaction(ctx, tx)
 	if err != nil {
@@ -492,4 +546,41 @@ func detectReconciliationIssues(p Payment, captured, refunded int64) []string {
 		out = append(out, "status_voided_with_capture_activity")
 	}
 	return out
+}
+
+func (s *Service) providerFor(name string) (ProviderAdapter, error) {
+	key := normalizeProviderName(name)
+	p, ok := s.providers[key]
+	if ok {
+		return p, nil
+	}
+	if def, ok := s.providers["default"]; ok {
+		return def, nil
+	}
+	return nil, sharederrors.BadRequest("payment provider is not configured")
+}
+
+func (s *Service) SaveDispute(ctx context.Context, d Dispute) (Dispute, error) {
+	if strings.TrimSpace(d.PaymentID) == "" || strings.TrimSpace(d.ProviderCaseID) == "" || d.AmountCents <= 0 || len(strings.TrimSpace(d.Currency)) != 3 {
+		return Dispute{}, sharederrors.BadRequest("invalid dispute payload")
+	}
+	if d.ID == "" {
+		d.ID = utils.NewID("pdp")
+	}
+	if d.Status == "" {
+		d.Status = "open"
+	}
+	saved, err := s.repo.SaveDispute(ctx, d)
+	if err != nil {
+		return Dispute{}, sharederrors.Internal("failed to save dispute")
+	}
+	return saved, nil
+}
+
+func (s *Service) ListDisputes(ctx context.Context, tenantID, regionID string) ([]Dispute, error) {
+	out, err := s.repo.ListDisputes(ctx, tenantID, regionID)
+	if err != nil {
+		return nil, sharederrors.Internal("failed to list disputes")
+	}
+	return out, nil
 }

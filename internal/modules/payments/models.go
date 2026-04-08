@@ -78,3 +78,16 @@ type ReconciliationReport struct {
 	GeneratedAt int64                `json:"generated_at"`
 	Items       []ReconciliationItem `json:"items"`
 }
+
+type Dispute struct {
+	ID             string `json:"id"`
+	TenantID       string `json:"tenant_id"`
+	RegionID       string `json:"region_id"`
+	PaymentID      string `json:"payment_id"`
+	Provider       string `json:"provider"`
+	ProviderCaseID string `json:"provider_case_id"`
+	Reason         string `json:"reason"`
+	Status         string `json:"status"`
+	AmountCents    int64  `json:"amount_cents"`
+	Currency       string `json:"currency"`
+}

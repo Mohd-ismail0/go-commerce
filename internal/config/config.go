@@ -8,22 +8,23 @@ import (
 )
 
 type Config struct {
-	AppEnv                string
-	Port                  string
-	DatabaseURL           string
-	APIAuthToken          string
-	AuthJWTSecret         string
-	AuthJWTKeyset         string
-	AuthJWTTTLMinutes     int
-	AuthRefreshTTLMinutes int
-	AllowLegacyRoleBypass bool
-	DefaultRegionID       string
-	DefaultTenantID       string
-	WebhookTimeoutMS      int
-	WebhookPaymentSecret  string
-	HTTPTimeoutMS         int
-	HTTPMaxBodyBytes      int64
-	LogLevel              string
+	AppEnv                          string
+	Port                            string
+	DatabaseURL                     string
+	APIAuthToken                    string
+	AuthJWTSecret                   string
+	AuthJWTKeyset                   string
+	AuthJWTTTLMinutes               int
+	AuthRefreshTTLMinutes           int
+	AllowLegacyRoleBypass           bool
+	DefaultRegionID                 string
+	DefaultTenantID                 string
+	WebhookTimeoutMS                int
+	WebhookPaymentSecret            string
+	PaymentReconcileIntervalSeconds int
+	HTTPTimeoutMS                   int
+	HTTPMaxBodyBytes                int64
+	LogLevel                        string
 }
 
 func Load() (Config, error) {
@@ -47,24 +48,29 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	paymentReconcileIntervalSeconds, err := getEnvIntInRange("PAYMENT_RECONCILE_INTERVAL_SECONDS", 300, 5, 86400)
+	if err != nil {
+		return Config{}, err
+	}
 
 	cfg := Config{
-		AppEnv:                getEnv("APP_ENV", "development"),
-		Port:                  getEnv("PORT", "8080"),
-		DatabaseURL:           getEnv("DATABASE_URL", ""),
-		APIAuthToken:          getEnv("API_AUTH_TOKEN", ""),
-		AuthJWTSecret:         getEnv("AUTH_JWT_SECRET", ""),
-		AuthJWTKeyset:         getEnv("AUTH_JWT_KEYSET", ""),
-		AuthJWTTTLMinutes:     authJWTTTLMinutes,
-		AuthRefreshTTLMinutes: authRefreshTTLMinutes,
-		AllowLegacyRoleBypass: getEnvBool("ALLOW_LEGACY_ROLE_BYPASS", false),
-		DefaultRegionID:       getEnv("DEFAULT_REGION_ID", "global"),
-		DefaultTenantID:       getEnv("DEFAULT_TENANT_ID", "public"),
-		WebhookTimeoutMS:      webhookTimeoutMS,
-		WebhookPaymentSecret:  getEnv("WEBHOOK_PAYMENT_SECRET", ""),
-		HTTPTimeoutMS:         httpTimeoutMS,
-		HTTPMaxBodyBytes:      int64(httpMaxBodyBytes),
-		LogLevel:              getEnv("LOG_LEVEL", "info"),
+		AppEnv:                          getEnv("APP_ENV", "development"),
+		Port:                            getEnv("PORT", "8080"),
+		DatabaseURL:                     getEnv("DATABASE_URL", ""),
+		APIAuthToken:                    getEnv("API_AUTH_TOKEN", ""),
+		AuthJWTSecret:                   getEnv("AUTH_JWT_SECRET", ""),
+		AuthJWTKeyset:                   getEnv("AUTH_JWT_KEYSET", ""),
+		AuthJWTTTLMinutes:               authJWTTTLMinutes,
+		AuthRefreshTTLMinutes:           authRefreshTTLMinutes,
+		AllowLegacyRoleBypass:           getEnvBool("ALLOW_LEGACY_ROLE_BYPASS", false),
+		DefaultRegionID:                 getEnv("DEFAULT_REGION_ID", "global"),
+		DefaultTenantID:                 getEnv("DEFAULT_TENANT_ID", "public"),
+		WebhookTimeoutMS:                webhookTimeoutMS,
+		WebhookPaymentSecret:            getEnv("WEBHOOK_PAYMENT_SECRET", ""),
+		PaymentReconcileIntervalSeconds: paymentReconcileIntervalSeconds,
+		HTTPTimeoutMS:                   httpTimeoutMS,
+		HTTPMaxBodyBytes:                int64(httpMaxBodyBytes),
+		LogLevel:                        getEnv("LOG_LEVEL", "info"),
 	}
 	if err := validate(cfg); err != nil {
 		return Config{}, err

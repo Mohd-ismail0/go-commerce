@@ -175,6 +175,45 @@ ORDER BY created_at DESC
 	return out, rows.Err()
 }
 
+func (r *Repository) SaveDispute(ctx context.Context, d Dispute) (Dispute, error) {
+	_, err := r.db.ExecContext(ctx, `
+INSERT INTO payment_disputes (id, tenant_id, region_id, payment_id, provider, provider_case_id, reason, status, amount_cents, currency, created_at, updated_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),NOW())
+ON CONFLICT (tenant_id, provider, provider_case_id) DO UPDATE SET
+reason = EXCLUDED.reason,
+status = EXCLUDED.status,
+amount_cents = EXCLUDED.amount_cents,
+currency = EXCLUDED.currency,
+updated_at = NOW()
+`, d.ID, d.TenantID, d.RegionID, d.PaymentID, d.Provider, d.ProviderCaseID, d.Reason, d.Status, d.AmountCents, d.Currency)
+	if err != nil {
+		return Dispute{}, err
+	}
+	return d, nil
+}
+
+func (r *Repository) ListDisputes(ctx context.Context, tenantID, regionID string) ([]Dispute, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT id, tenant_id, region_id, payment_id, provider, provider_case_id, reason, status, amount_cents, currency
+FROM payment_disputes
+WHERE tenant_id = $1 AND region_id = $2
+ORDER BY created_at DESC
+`, tenantID, regionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Dispute{}
+	for rows.Next() {
+		var d Dispute
+		if err := rows.Scan(&d.ID, &d.TenantID, &d.RegionID, &d.PaymentID, &d.Provider, &d.ProviderCaseID, &d.Reason, &d.Status, &d.AmountCents, &d.Currency); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 func nullable(v string) any {
 	if strings.TrimSpace(v) == "" {
 		return nil

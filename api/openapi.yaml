@@ -944,6 +944,29 @@ paths:
       responses:
         "200":
           description: Reconciliation report
+  /payments/disputes:
+    get:
+      summary: List payment disputes
+      security:
+        - ApiTokenAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Disputes list
+    post:
+      summary: Upsert payment dispute case
+      security:
+        - ApiTokenAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "201":
+          description: Dispute saved
   /payments/{id}:
     get:
       summary: Get payment by id

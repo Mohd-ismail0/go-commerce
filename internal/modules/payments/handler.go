@@ -25,6 +25,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Route("/payments", func(r chi.Router) {
 		r.Get("/", h.list)
 		r.Get("/reconcile", h.reconcile)
+		r.Get("/disputes", h.listDisputes)
+		r.Post("/disputes", h.saveDispute)
 		r.Post("/", h.save)
 		r.Get("/{id}", h.get)
 		r.Get("/{id}/transactions", h.transactions)
@@ -33,6 +35,31 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Post("/{id}/void", h.void)
 	})
 	r.Post("/webhooks/payments/{tenant_id}/{provider}", h.webhook)
+}
+
+func (h *Handler) listDisputes(w http.ResponseWriter, r *http.Request) {
+	items, err := h.svc.ListDisputes(r.Context(), middleware.TenantIDFromContext(r.Context()), middleware.RegionIDFromContext(r.Context()))
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *Handler) saveDispute(w http.ResponseWriter, r *http.Request) {
+	var d Dispute
+	if err := json.NewDecoder(r.Body).Decode(&d); err != nil {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
+		return
+	}
+	d.TenantID = middleware.TenantIDFromContext(r.Context())
+	d.RegionID = middleware.RegionIDFromContext(r.Context())
+	saved, err := h.svc.SaveDispute(r.Context(), d)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusCreated, saved)
 }
 
 func (h *Handler) reconcile(w http.ResponseWriter, r *http.Request) {
