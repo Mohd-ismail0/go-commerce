@@ -7,6 +7,8 @@ package sqlc
 import (
 	"database/sql"
 	"time"
+
+	"github.com/sqlc-dev/pqtype"
 )
 
 type Brand struct {
@@ -99,15 +101,21 @@ type PriceBookEntry struct {
 }
 
 type Product struct {
-	ID         string
-	TenantID   string
-	RegionID   string
-	Sku        string
-	Name       string
-	Currency   string
-	PriceCents int64
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID                string
+	TenantID          string
+	RegionID          string
+	Sku               string
+	Name              string
+	Slug              sql.NullString
+	Description       sql.NullString
+	SeoTitle          sql.NullString
+	SeoDescription    sql.NullString
+	Metadata          pqtype.NullRawMessage
+	ExternalReference sql.NullString
+	Currency          string
+	PriceCents        int64
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 type ProductMedium struct {

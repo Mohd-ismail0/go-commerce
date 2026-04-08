@@ -106,6 +106,19 @@ components:
           type: string
           minLength: 1
           maxLength: 256
+        slug:
+          type: string
+        description:
+          type: string
+        seo_title:
+          type: string
+        seo_description:
+          type: string
+        metadata:
+          type: string
+          description: JSON-encoded metadata blob.
+        external_reference:
+          type: string
         currency:
           type: string
           pattern: "^[A-Z]{3}$"
@@ -130,6 +143,19 @@ components:
           type: string
           minLength: 1
           maxLength: 256
+        slug:
+          type: string
+        description:
+          type: string
+        seo_title:
+          type: string
+        seo_description:
+          type: string
+        metadata:
+          type: string
+          description: JSON-encoded metadata blob.
+        external_reference:
+          type: string
         currency:
           type: string
           pattern: "^[A-Z]{3}$"

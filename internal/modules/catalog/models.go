@@ -6,6 +6,12 @@ type Product struct {
 	RegionID   string `json:"region_id"`
 	SKU        string `json:"sku"`
 	Name       string `json:"name"`
+	Slug       string `json:"slug,omitempty"`
+	Description string `json:"description,omitempty"`
+	SEOTitle   string `json:"seo_title,omitempty"`
+	SEODescription string `json:"seo_description,omitempty"`
+	Metadata   string `json:"metadata,omitempty"`
+	ExternalReference string `json:"external_reference,omitempty"`
 	Currency   string `json:"currency"`
 	PriceCents int64  `json:"price_cents"`
 	CreatedAt  string `json:"created_at,omitempty"`

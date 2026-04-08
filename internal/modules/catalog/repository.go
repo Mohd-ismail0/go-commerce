@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/sqlc-dev/pqtype"
 	dbsqlc "rewrite/internal/shared/db/sqlc"
 )
 
@@ -55,6 +56,12 @@ func (r *PostgresRepository) Upsert(ctx context.Context, product Product, idempo
 					RegionID:   existing.RegionID,
 					SKU:        existing.Sku,
 					Name:       existing.Name,
+					Slug:       existing.Slug.String,
+					Description: existing.Description.String,
+					SEOTitle:   existing.SeoTitle.String,
+					SEODescription: existing.SeoDescription.String,
+					Metadata:   metadataString(existing.Metadata),
+					ExternalReference: existing.ExternalReference.String,
 					Currency:   existing.Currency,
 					PriceCents: existing.PriceCents,
 					CreatedAt:  existing.CreatedAt.UTC().Format(time.RFC3339Nano),
@@ -68,6 +75,12 @@ func (r *PostgresRepository) Upsert(ctx context.Context, product Product, idempo
 		RegionID:   product.RegionID,
 		Sku:        product.SKU,
 		Name:       product.Name,
+		Slug:       nullString(product.Slug),
+		Description: nullString(product.Description),
+		SeoTitle:   nullString(product.SEOTitle),
+		SeoDescription: nullString(product.SEODescription),
+		Metadata:   nullRawMessage(product.Metadata),
+		ExternalReference: nullString(product.ExternalReference),
 		Currency:   product.Currency,
 		PriceCents: product.PriceCents,
 	})
@@ -88,6 +101,12 @@ func (r *PostgresRepository) Upsert(ctx context.Context, product Product, idempo
 		RegionID:   row.RegionID,
 		SKU:        row.Sku,
 		Name:       row.Name,
+		Slug:       row.Slug.String,
+		Description: row.Description.String,
+		SEOTitle:   row.SeoTitle.String,
+		SEODescription: row.SeoDescription.String,
+		Metadata:   metadataString(row.Metadata),
+		ExternalReference: row.ExternalReference.String,
 		Currency:   row.Currency,
 		PriceCents: row.PriceCents,
 		CreatedAt:  row.CreatedAt.UTC().Format(time.RFC3339Nano),
@@ -113,6 +132,12 @@ func (r *PostgresRepository) List(ctx context.Context, tenantID, regionID, sku s
 			RegionID:   row.RegionID,
 			SKU:        row.Sku,
 			Name:       row.Name,
+			Slug:       row.Slug.String,
+			Description: row.Description.String,
+			SEOTitle:   row.SeoTitle.String,
+			SEODescription: row.SeoDescription.String,
+			Metadata:   metadataString(row.Metadata),
+			ExternalReference: row.ExternalReference.String,
 			Currency:   row.Currency,
 			PriceCents: row.PriceCents,
 			CreatedAt:  row.CreatedAt.UTC().Format(time.RFC3339Nano),
@@ -190,6 +215,24 @@ func derefTime(t *time.Time) time.Time {
 		return time.Time{}
 	}
 	return *t
+}
+
+func nullString(v string) sql.NullString {
+	return sql.NullString{String: v, Valid: v != ""}
+}
+
+func nullRawMessage(v string) pqtype.NullRawMessage {
+	if v == "" {
+		return pqtype.NullRawMessage{}
+	}
+	return pqtype.NullRawMessage{RawMessage: []byte(v), Valid: true}
+}
+
+func metadataString(v pqtype.NullRawMessage) string {
+	if !v.Valid {
+		return ""
+	}
+	return string(v.RawMessage)
 }
 
 func (r *PostgresRepository) InsertCategory(ctx context.Context, category Category) (Category, error) {

@@ -26,6 +26,12 @@ CREATE TABLE IF NOT EXISTS products (
   region_id TEXT NOT NULL,
   sku TEXT NOT NULL,
   name TEXT NOT NULL,
+  slug TEXT,
+  description TEXT,
+  seo_title TEXT,
+  seo_description TEXT,
+  metadata JSONB,
+  external_reference TEXT,
   currency TEXT NOT NULL,
   price_cents BIGINT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -171,6 +177,10 @@ CREATE TABLE IF NOT EXISTS webhook_endpoints (
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_products_tenant_region_sku
 ON products (tenant_id, region_id, sku);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_products_tenant_region_slug
+ON products (tenant_id, region_id, slug)
+WHERE slug IS NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_product_variants_tenant_region_sku
 ON product_variants (tenant_id, region_id, sku);
