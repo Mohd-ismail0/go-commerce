@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"net/http"
 	"strings"
+	"time"
 
 	"rewrite/internal/shared/permissions"
 	"rewrite/internal/shared/utils"
@@ -15,11 +16,17 @@ type PolicyRule struct {
 	PermissionCode string
 }
 
+type PolicyOptions struct {
+	UserJWTSecret         string
+	AllowLegacyRoleBypass bool
+}
+
 // PolicyAuthorization enforces permission codes on sensitive routes. Access is allowed when:
-//   - X-Role is "admin" (case-insensitive), or
-//   - X-User-ID is set and the user has the required permission in the database, or
-//   - legacy: X-Role is any other non-empty value (same escape hatch as the previous header-only guard).
-func PolicyAuthorization(db *sql.DB, rules []PolicyRule) func(http.Handler) http.Handler {
+//   - X-User-JWT is valid and has role "admin", or
+//   - X-User-JWT is valid and mapped user has required permission in DB.
+//
+// Optional compatibility mode: AllowLegacyRoleBypass permits legacy non-empty X-Role values.
+func PolicyAuthorization(db *sql.DB, rules []PolicyRule, opts PolicyOptions) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
@@ -29,14 +36,19 @@ func PolicyAuthorization(db *sql.DB, rules []PolicyRule) func(http.Handler) http
 				return
 			}
 
-			role := strings.TrimSpace(r.Header.Get("X-Role"))
-			if strings.EqualFold(role, "admin") {
-				next.ServeHTTP(w, r)
+			userID, roles, jwtErr := resolveIdentity(r, opts)
+			if jwtErr != nil {
+				utils.JSON(w, http.StatusUnauthorized, map[string]any{
+					"code":    "unauthorized",
+					"message": jwtErr.Error(),
+				})
 				return
 			}
-
-			userID := strings.TrimSpace(r.Header.Get("X-User-ID"))
-			if userID != "" {
+			if hasAdminRole(roles) {
+				next.ServeHTTP(w, r.WithContext(WithUserID(r.Context(), userID)))
+				return
+			}
+			if strings.TrimSpace(userID) != "" {
 				tenantID := TenantIDFromContext(r.Context())
 				ok, err := permissions.UserHasPermission(r.Context(), db, tenantID, userID, code)
 				if err != nil {
@@ -47,28 +59,62 @@ func PolicyAuthorization(db *sql.DB, rules []PolicyRule) func(http.Handler) http
 					return
 				}
 				if ok {
-					next.ServeHTTP(w, r)
+					next.ServeHTTP(w, r.WithContext(WithUserID(r.Context(), userID)))
 					return
 				}
-				utils.JSON(w, http.StatusForbidden, map[string]any{
-					"code":    "forbidden",
-					"message": "missing required permission",
-				})
-				return
-			}
-
-			if role != "" {
-				next.ServeHTTP(w, r)
-				return
 			}
 
 			utils.JSON(w, http.StatusForbidden, map[string]any{
 				"code":    "forbidden",
-				"message": "missing identity: set X-User-ID with a permitted user or X-Role",
+				"message": "missing required permission",
 			})
 		})
 	}
 }
+
+func resolveIdentity(r *http.Request, opts PolicyOptions) (string, []string, error) {
+	token := strings.TrimSpace(r.Header.Get("X-User-JWT"))
+	if token != "" {
+		secret := strings.TrimSpace(opts.UserJWTSecret)
+		if secret == "" {
+			return "", nil, httpError("user jwt secret is not configured")
+		}
+		claims, err := ParseAndVerifyUserJWT(token, secret, time.Now().UTC())
+		if err != nil {
+			return "", nil, httpError(err.Error())
+		}
+		reqTenant := TenantIDFromContext(r.Context())
+		if claims.TenantID != "" && reqTenant != "" && !strings.EqualFold(claims.TenantID, reqTenant) {
+			return "", nil, httpError("jwt tenant mismatch")
+		}
+		return claims.Subject, claims.Roles, nil
+	}
+
+	if opts.AllowLegacyRoleBypass {
+		role := strings.TrimSpace(r.Header.Get("X-Role"))
+		if role != "" {
+			userID := strings.TrimSpace(r.Header.Get("X-User-ID"))
+			if userID == "" {
+				userID = "legacy-role-user"
+			}
+			return userID, []string{role}, nil
+		}
+	}
+	return "", nil, nil
+}
+
+func hasAdminRole(roles []string) bool {
+	for _, role := range roles {
+		if strings.EqualFold(strings.TrimSpace(role), "admin") {
+			return true
+		}
+	}
+	return false
+}
+
+type httpError string
+
+func (e httpError) Error() string { return string(e) }
 
 // MatchPolicyRule returns the permission code for the longest matching prefix rule.
 func MatchPolicyRule(path string, rules []PolicyRule) string {

@@ -56,3 +56,15 @@ func TestLoadRejectsOutOfRangeValues(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestLoadParsesLegacyBypassFlag(t *testing.T) {
+	t.Setenv("APP_ENV", "test")
+	t.Setenv("ALLOW_LEGACY_ROLE_BYPASS", "true")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.AllowLegacyRoleBypass {
+		t.Fatalf("expected AllowLegacyRoleBypass to be true")
+	}
+}

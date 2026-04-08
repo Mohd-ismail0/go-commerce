@@ -8,17 +8,19 @@ import (
 )
 
 type Config struct {
-	AppEnv               string
-	Port                 string
-	DatabaseURL          string
-	APIAuthToken         string
-	DefaultRegionID      string
-	DefaultTenantID      string
-	WebhookTimeoutMS     int
-	WebhookPaymentSecret string
-	HTTPTimeoutMS        int
-	HTTPMaxBodyBytes     int64
-	LogLevel             string
+	AppEnv                string
+	Port                  string
+	DatabaseURL           string
+	APIAuthToken          string
+	AuthJWTSecret         string
+	AllowLegacyRoleBypass bool
+	DefaultRegionID       string
+	DefaultTenantID       string
+	WebhookTimeoutMS      int
+	WebhookPaymentSecret  string
+	HTTPTimeoutMS         int
+	HTTPMaxBodyBytes      int64
+	LogLevel              string
 }
 
 func Load() (Config, error) {
@@ -36,17 +38,19 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		AppEnv:               getEnv("APP_ENV", "development"),
-		Port:                 getEnv("PORT", "8080"),
-		DatabaseURL:          getEnv("DATABASE_URL", ""),
-		APIAuthToken:         getEnv("API_AUTH_TOKEN", ""),
-		DefaultRegionID:      getEnv("DEFAULT_REGION_ID", "global"),
-		DefaultTenantID:      getEnv("DEFAULT_TENANT_ID", "public"),
-		WebhookTimeoutMS:     webhookTimeoutMS,
-		WebhookPaymentSecret: getEnv("WEBHOOK_PAYMENT_SECRET", ""),
-		HTTPTimeoutMS:        httpTimeoutMS,
-		HTTPMaxBodyBytes:     int64(httpMaxBodyBytes),
-		LogLevel:             getEnv("LOG_LEVEL", "info"),
+		AppEnv:                getEnv("APP_ENV", "development"),
+		Port:                  getEnv("PORT", "8080"),
+		DatabaseURL:           getEnv("DATABASE_URL", ""),
+		APIAuthToken:          getEnv("API_AUTH_TOKEN", ""),
+		AuthJWTSecret:         getEnv("AUTH_JWT_SECRET", ""),
+		AllowLegacyRoleBypass: getEnvBool("ALLOW_LEGACY_ROLE_BYPASS", false),
+		DefaultRegionID:       getEnv("DEFAULT_REGION_ID", "global"),
+		DefaultTenantID:       getEnv("DEFAULT_TENANT_ID", "public"),
+		WebhookTimeoutMS:      webhookTimeoutMS,
+		WebhookPaymentSecret:  getEnv("WEBHOOK_PAYMENT_SECRET", ""),
+		HTTPTimeoutMS:         httpTimeoutMS,
+		HTTPMaxBodyBytes:      int64(httpMaxBodyBytes),
+		LogLevel:              getEnv("LOG_LEVEL", "info"),
 	}
 	if err := validate(cfg); err != nil {
 		return Config{}, err
@@ -74,6 +78,14 @@ func getEnvIntInRange(key string, fallback, min, max int) (int, error) {
 		return 0, fmt.Errorf("%s must be between %d and %d", key, min, max)
 	}
 	return parsed, nil
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if raw == "" {
+		return fallback
+	}
+	return raw == "1" || raw == "true" || raw == "yes" || raw == "on"
 }
 
 func validate(cfg Config) error {

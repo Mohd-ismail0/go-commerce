@@ -21,8 +21,8 @@ components:
     UserHeaderAuth:
       type: apiKey
       in: header
-      name: X-User-ID
-      description: User id for database-backed permission checks (roles joined to permissions).
+      name: X-User-JWT
+      description: Signed user JWT (HS256) used for identity and role/permission checks.
   parameters:
     TenantHeader:
       in: header
@@ -46,7 +46,7 @@ components:
         maxLength: 128
     UserIdHeader:
       in: header
-      name: X-User-ID
+      name: X-User-JWT
       required: false
       schema:
         type: string

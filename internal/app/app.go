@@ -72,6 +72,9 @@ func New(ctx context.Context) (*App, error) {
 				{Prefix: "/shipping", PermissionCode: "shipping.manage"},
 				{Prefix: "/identity/users", PermissionCode: "identity.users.manage"},
 				{Prefix: "/metadata", PermissionCode: "metadata.manage"},
+			}, middleware.PolicyOptions{
+				UserJWTSecret:         cfg.AuthJWTSecret,
+				AllowLegacyRoleBypass: cfg.AllowLegacyRoleBypass,
 			}),
 			middleware.Timeout(time.Duration(cfg.HTTPTimeoutMS) * time.Millisecond),
 			middleware.BodyLimit(cfg.HTTPMaxBodyBytes),
