@@ -36,7 +36,9 @@ WHERE tenant_id = $1 ORDER BY created_at DESC
 	if err != nil {
 		return []Promotion{}
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []Promotion{}
 	for rows.Next() {
 		var p Promotion
@@ -73,7 +75,9 @@ ORDER BY created_at DESC
 	if err != nil {
 		return []PromotionRule{}
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []PromotionRule{}
 	for rows.Next() {
 		var p PromotionRule
@@ -121,7 +125,9 @@ ORDER BY created_at DESC
 	if err != nil {
 		return []Voucher{}
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []Voucher{}
 	for rows.Next() {
 		var v Voucher

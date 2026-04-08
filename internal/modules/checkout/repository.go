@@ -116,7 +116,9 @@ WHERE checkout_id = $1 AND tenant_id = $2 AND region_id = $3
 	if err != nil {
 		return OrderCreatedPayload{}, err
 	}
-	defer lines.Close()
+	defer func() {
+		_ = lines.Close()
+	}()
 	collected := make([]Line, 0)
 	for lines.Next() {
 		var l Line

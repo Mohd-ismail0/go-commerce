@@ -90,7 +90,7 @@ func TestOrdersListIsTenantScoped(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", rr.Code)
 	}
 	body := rr.Body.String()
-	if !(strings.Contains(body, "tenant_a") && !strings.Contains(body, "tenant_b")) {
+	if !strings.Contains(body, "tenant_a") || strings.Contains(body, "tenant_b") {
 		t.Fatalf("expected response scoped to tenant_a, got body: %s", body)
 	}
 }

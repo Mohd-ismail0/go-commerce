@@ -39,7 +39,9 @@ func (r *Repository) List(ctx context.Context, tenantID string) ([]Payment, erro
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []Payment{}
 	for rows.Next() {
 		var item Payment
@@ -104,7 +106,9 @@ ORDER BY created_at ASC
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []PaymentTransaction{}
 	for rows.Next() {
 		var t PaymentTransaction
@@ -172,7 +176,9 @@ ORDER BY created_at DESC
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []Payment{}
 	for rows.Next() {
 		var item Payment
@@ -246,7 +252,9 @@ ORDER BY created_at DESC
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []ReconciliationAction{}
 	for rows.Next() {
 		var a ReconciliationAction
@@ -268,7 +276,9 @@ ORDER BY created_at DESC
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []Dispute{}
 	for rows.Next() {
 		var d Dispute

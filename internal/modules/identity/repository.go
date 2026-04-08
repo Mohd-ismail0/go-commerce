@@ -38,7 +38,9 @@ func (r *Repository) List(ctx context.Context, tenantID string) ([]User, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []User{}
 	for rows.Next() {
 		var item User
@@ -72,7 +74,9 @@ WHERE ur.user_id = $1 AND r.tenant_id = $2
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []string{}
 	for rows.Next() {
 		var role string
@@ -145,7 +149,9 @@ ORDER BY created_at DESC
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []SessionInfo{}
 	for rows.Next() {
 		var item SessionInfo

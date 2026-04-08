@@ -32,7 +32,9 @@ WHERE tenant_id = $1 ORDER BY created_at DESC
 	if err != nil {
 		return []Customer{}
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []Customer{}
 	for rows.Next() {
 		var c Customer

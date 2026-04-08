@@ -48,7 +48,9 @@ ORDER BY created_at ASC LIMIT $1
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []OutboxEvent{}
 	for rows.Next() {
 		var item OutboxEvent
@@ -96,7 +98,9 @@ WHERE tenant_id=$1 AND region_id=$2 AND event_name=$3 AND is_active=TRUE
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []WebhookSubscription{}
 	for rows.Next() {
 		var sub WebhookSubscription

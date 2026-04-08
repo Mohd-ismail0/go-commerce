@@ -73,7 +73,9 @@ ORDER BY created_at DESC
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	out := make([]Fulfillment, 0)
 	for rows.Next() {

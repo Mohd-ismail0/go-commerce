@@ -42,7 +42,9 @@ FROM shipping_zones WHERE tenant_id = $1 ORDER BY created_at DESC
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []ShippingZone{}
 	for rows.Next() {
 		z, err := scanZone(rows)
@@ -131,7 +133,9 @@ FROM shipping_methods WHERE tenant_id = $1 ORDER BY created_at DESC
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []ShippingMethod{}
 	for rows.Next() {
 		m, err := scanMethod(rows)
@@ -153,7 +157,9 @@ WHERE m.tenant_id = $1 AND m.region_id = $2
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []ShippingMethod{}
 	for rows.Next() {
 		m, err := scanMethod(rows)

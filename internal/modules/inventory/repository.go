@@ -34,7 +34,9 @@ WHERE tenant_id = $1 ORDER BY created_at DESC
 	if err != nil {
 		return []StockItem{}
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []StockItem{}
 	for rows.Next() {
 		var i StockItem

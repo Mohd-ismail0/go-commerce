@@ -33,7 +33,9 @@ WHERE tenant_id = $1 ORDER BY created_at DESC
 	if err != nil {
 		return []PriceBookEntry{}
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []PriceBookEntry{}
 	for rows.Next() {
 		var e PriceBookEntry
@@ -65,7 +67,9 @@ WHERE tenant_id = $1 ORDER BY created_at DESC
 	if err != nil {
 		return []TaxClass{}
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []TaxClass{}
 	for rows.Next() {
 		var e TaxClass
@@ -99,7 +103,9 @@ WHERE tenant_id = $1 ORDER BY created_at DESC
 	if err != nil {
 		return []TaxRate{}
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []TaxRate{}
 	for rows.Next() {
 		var e TaxRate

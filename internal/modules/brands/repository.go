@@ -33,7 +33,9 @@ WHERE tenant_id = $1 ORDER BY created_at DESC
 	if err != nil {
 		return []Brand{}
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []Brand{}
 	for rows.Next() {
 		var b Brand
