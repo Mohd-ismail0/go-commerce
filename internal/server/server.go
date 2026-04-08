@@ -17,13 +17,22 @@ type Server struct {
 	httpServer *http.Server
 }
 
-func New(port string, middlewares []func(http.Handler) http.Handler, registrars ...RouteRegistrar) *Server {
+type ReadinessChecker func(ctx context.Context) error
+
+func New(port string, middlewares []func(http.Handler) http.Handler, readyCheck ReadinessChecker, registrars ...RouteRegistrar) *Server {
 	r := chi.NewRouter()
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	r.Get("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+	r.Get("/readyz", func(w http.ResponseWriter, req *http.Request) {
+		if readyCheck != nil {
+			if err := readyCheck(req.Context()); err != nil {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte("not ready"))
+				return
+			}
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ready"))
 	})

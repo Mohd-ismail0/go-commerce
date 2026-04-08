@@ -94,6 +94,9 @@ func New(ctx context.Context) (*App, error) {
 			middleware.Timeout(time.Duration(cfg.HTTPTimeoutMS) * time.Millisecond),
 			middleware.BodyLimit(cfg.HTTPMaxBodyBytes),
 		},
+		func(ctx context.Context) error {
+			return conn.PingContext(ctx)
+		},
 		catalog.NewHandler(catalog.NewService(catalog.NewRepository(conn), bus)),
 		checkout.NewHandler(checkout.NewService(checkout.NewRepository(conn), bus, pricingSvc)),
 		orders.NewHandler(orderSvc),
