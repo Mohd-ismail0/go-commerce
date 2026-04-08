@@ -37,6 +37,7 @@ make build
 - Identity now supports `login`, `refresh`, and `logout` session flows with hashed refresh tokens stored server-side.
 - JWT key rotation is supported via `AUTH_JWT_KEYSET` in `kid:secret` CSV format; the first key is used for signing and all keys are accepted for verification.
 - Refresh-token replay detection revokes compromised sessions when a previously-rotated token is reused.
+- Identity sessions now support listing/revocation APIs and optional device binding on refresh to reduce token theft blast radius.
 
 ## Rollback guidance
 

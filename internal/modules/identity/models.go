@@ -13,6 +13,7 @@ type User struct {
 type LoginInput struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	DeviceID string `json:"device_id,omitempty"`
 }
 
 type LoginResult struct {
@@ -28,4 +29,16 @@ type LoginResult struct {
 
 type RefreshInput struct {
 	RefreshToken string `json:"refresh_token"`
+	DeviceID     string `json:"device_id,omitempty"`
+}
+
+type SessionInfo struct {
+	ID            string `json:"id"`
+	UserID        string `json:"user_id"`
+	DeviceID      string `json:"device_id,omitempty"`
+	IPHash        string `json:"ip_hash,omitempty"`
+	UserAgent     string `json:"user_agent,omitempty"`
+	ExpiresAt     int64  `json:"expires_at"`
+	RevokedAt     int64  `json:"revoked_at,omitempty"`
+	CompromisedAt int64  `json:"compromised_at,omitempty"`
 }

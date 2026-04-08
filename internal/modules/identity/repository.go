@@ -83,25 +83,25 @@ WHERE ur.user_id = $1 AND r.tenant_id = $2
 	return out, rows.Err()
 }
 
-func (r *Repository) CreateAuthSession(ctx context.Context, sessionID, tenantID, userID, refreshHash string, expiresAt time.Time) error {
+func (r *Repository) CreateAuthSession(ctx context.Context, sessionID, tenantID, userID, refreshHash, deviceID, ipHash, userAgent string, expiresAt time.Time) error {
 	_, err := r.db.ExecContext(ctx, `
-INSERT INTO auth_sessions (id, tenant_id, user_id, refresh_token_hash, expires_at, revoked_at, created_at, updated_at)
-VALUES ($1,$2,$3,$4,$5,NULL,NOW(),NOW())
-`, sessionID, tenantID, userID, refreshHash, expiresAt.UTC())
+INSERT INTO auth_sessions (id, tenant_id, user_id, refresh_token_hash, device_id, ip_hash, user_agent, expires_at, revoked_at, created_at, updated_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULL,NOW(),NOW())
+`, sessionID, tenantID, userID, refreshHash, nullable(deviceID), nullable(ipHash), nullable(userAgent), expiresAt.UTC())
 	return err
 }
 
-func (r *Repository) GetActiveSessionByRefreshHash(ctx context.Context, tenantID, refreshHash string) (string, string, time.Time, error) {
+func (r *Repository) GetActiveSessionByRefreshHash(ctx context.Context, tenantID, refreshHash string) (string, string, string, time.Time, error) {
 	row := r.db.QueryRowContext(ctx, `
-SELECT id, user_id, expires_at
+SELECT id, user_id, COALESCE(device_id,''), expires_at
 FROM auth_sessions
 WHERE tenant_id = $1 AND refresh_token_hash = $2 AND revoked_at IS NULL
 LIMIT 1
 `, tenantID, refreshHash)
-	var sessionID, userID string
+	var sessionID, userID, deviceID string
 	var expiresAt time.Time
-	err := row.Scan(&sessionID, &userID, &expiresAt)
-	return sessionID, userID, expiresAt, err
+	err := row.Scan(&sessionID, &userID, &deviceID, &expiresAt)
+	return sessionID, userID, deviceID, expiresAt, err
 }
 
 func (r *Repository) RotateSessionRefreshToken(ctx context.Context, sessionID, newRefreshHash string, newExpiresAt time.Time) error {
@@ -133,4 +133,60 @@ WHERE tenant_id = $1 AND prev_refresh_token_hash = $2 AND revoked_at IS NULL
 	}
 	affected, _ := res.RowsAffected()
 	return affected > 0, nil
+}
+
+func (r *Repository) ListSessionsByUser(ctx context.Context, tenantID, userID string) ([]SessionInfo, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT id, user_id, COALESCE(device_id,''), COALESCE(ip_hash,''), COALESCE(user_agent,''), expires_at, revoked_at, compromised_at
+FROM auth_sessions
+WHERE tenant_id = $1 AND user_id = $2
+ORDER BY created_at DESC
+`, tenantID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []SessionInfo{}
+	for rows.Next() {
+		var item SessionInfo
+		var revokedAt, compromisedAt sql.NullTime
+		var expiresAt time.Time
+		if err := rows.Scan(&item.ID, &item.UserID, &item.DeviceID, &item.IPHash, &item.UserAgent, &expiresAt, &revokedAt, &compromisedAt); err != nil {
+			return nil, err
+		}
+		item.ExpiresAt = expiresAt.UTC().Unix()
+		if revokedAt.Valid {
+			item.RevokedAt = revokedAt.Time.UTC().Unix()
+		}
+		if compromisedAt.Valid {
+			item.CompromisedAt = compromisedAt.Time.UTC().Unix()
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) RevokeSessionByID(ctx context.Context, tenantID, userID, sessionID string) error {
+	_, err := r.db.ExecContext(ctx, `
+UPDATE auth_sessions
+SET revoked_at = NOW(), updated_at = NOW()
+WHERE tenant_id = $1 AND user_id = $2 AND id = $3 AND revoked_at IS NULL
+`, tenantID, userID, sessionID)
+	return err
+}
+
+func (r *Repository) RevokeOtherSessions(ctx context.Context, tenantID, userID, exceptSessionID string) error {
+	_, err := r.db.ExecContext(ctx, `
+UPDATE auth_sessions
+SET revoked_at = NOW(), updated_at = NOW()
+WHERE tenant_id = $1 AND user_id = $2 AND id <> $3 AND revoked_at IS NULL
+`, tenantID, userID, exceptSessionID)
+	return err
+}
+
+func nullable(v string) any {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	return strings.TrimSpace(v)
 }

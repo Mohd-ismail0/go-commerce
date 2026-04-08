@@ -1168,6 +1168,47 @@ paths:
       responses:
         "200":
           description: Logout success
+  /identity/auth/sessions:
+    get:
+      summary: List auth sessions for current user JWT subject
+      security:
+        - ApiTokenAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Session list
+  /identity/auth/sessions/{session_id}/revoke:
+    post:
+      summary: Revoke a specific auth session for current user JWT subject
+      security:
+        - ApiTokenAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session revoked
+  /identity/auth/sessions/revoke-others:
+    post:
+      summary: Revoke all other sessions except current refresh-token session
+      security:
+        - ApiTokenAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Other sessions revoked
   /translations:
     post:
       summary: Upsert translation

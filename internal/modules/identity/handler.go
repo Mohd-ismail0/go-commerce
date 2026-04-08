@@ -22,6 +22,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Post("/login", h.login)
 		r.Post("/refresh", h.refresh)
 		r.Post("/logout", h.logout)
+		r.Get("/sessions", h.sessions)
+		r.Post("/sessions/{session_id}/revoke", h.revokeSession)
+		r.Post("/sessions/revoke-others", h.revokeOthers)
 	})
 	r.Route("/identity/users", func(r chi.Router) {
 		r.Get("/", h.list)
@@ -92,6 +95,37 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.svc.Logout(r.Context(), middleware.TenantIDFromContext(r.Context()), in); err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+func (h *Handler) sessions(w http.ResponseWriter, r *http.Request) {
+	items, err := h.svc.ListSessions(r.Context(), middleware.TenantIDFromContext(r.Context()), r.Header.Get("X-User-JWT"))
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *Handler) revokeSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "session_id")
+	if err := h.svc.RevokeSession(r.Context(), middleware.TenantIDFromContext(r.Context()), r.Header.Get("X-User-JWT"), sessionID); err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+func (h *Handler) revokeOthers(w http.ResponseWriter, r *http.Request) {
+	var in RefreshInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
+		return
+	}
+	if err := h.svc.RevokeOtherSessions(r.Context(), middleware.TenantIDFromContext(r.Context()), r.Header.Get("X-User-JWT"), in.RefreshToken); err != nil {
 		utils.WriteError(w, err)
 		return
 	}

@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 	sharederrors "rewrite/internal/shared/errors"
+	"rewrite/internal/shared/middleware"
 )
 
 type Service struct {
@@ -93,7 +94,7 @@ func (s *Service) Login(ctx context.Context, tenantID string, in LoginInput) (Lo
 	if err != nil {
 		return LoginResult{}, sharederrors.Internal("failed to load user roles")
 	}
-	return s.issueSessionTokens(ctx, tenantID, user.ID, roles)
+	return s.issueSessionTokens(ctx, tenantID, user.ID, roles, in.DeviceID, "", "")
 }
 
 func (s *Service) Refresh(ctx context.Context, tenantID string, in RefreshInput) (LoginResult, error) {
@@ -101,7 +102,7 @@ func (s *Service) Refresh(ctx context.Context, tenantID string, in RefreshInput)
 		return LoginResult{}, sharederrors.BadRequest("refresh_token is required")
 	}
 	hash := hashRefreshToken(in.RefreshToken)
-	sessionID, userID, exp, err := s.repo.GetActiveSessionByRefreshHash(ctx, tenantID, hash)
+	sessionID, userID, deviceID, exp, err := s.repo.GetActiveSessionByRefreshHash(ctx, tenantID, hash)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			replayed, replayErr := s.repo.RevokeSessionByPreviousRefreshHash(ctx, tenantID, hash)
@@ -114,6 +115,9 @@ func (s *Service) Refresh(ctx context.Context, tenantID string, in RefreshInput)
 	}
 	if time.Now().UTC().After(exp) {
 		return LoginResult{}, sharederrors.BadRequest("refresh token expired")
+	}
+	if strings.TrimSpace(in.DeviceID) != "" && strings.TrimSpace(deviceID) != "" && strings.TrimSpace(in.DeviceID) != strings.TrimSpace(deviceID) {
+		return LoginResult{}, sharederrors.Conflict("refresh token device mismatch")
 	}
 	roles, err := s.repo.RolesForUser(ctx, tenantID, userID)
 	if err != nil {
@@ -159,7 +163,7 @@ func (s *Service) Logout(ctx context.Context, tenantID string, in RefreshInput) 
 	return nil
 }
 
-func (s *Service) issueSessionTokens(ctx context.Context, tenantID, userID string, roles []string) (LoginResult, error) {
+func (s *Service) issueSessionTokens(ctx context.Context, tenantID, userID string, roles []string, deviceID, ipHash, userAgent string) (LoginResult, error) {
 	accessExp := time.Now().UTC().Add(time.Duration(s.jwtTTLMinute) * time.Minute)
 	access, err := signHS256JWT(s.signingKey, map[string]any{
 		"sub":       userID,
@@ -180,7 +184,7 @@ func (s *Service) issueSessionTokens(ctx context.Context, tenantID, userID strin
 	}
 	sessionID := "sess_" + userID + "_" + strings.ToLower(sessionRandom)
 	refreshExp := time.Now().UTC().Add(time.Duration(s.refreshTTLMinutes) * time.Minute)
-	if err := s.repo.CreateAuthSession(ctx, sessionID, tenantID, userID, hashRefreshToken(refreshToken), refreshExp); err != nil {
+	if err := s.repo.CreateAuthSession(ctx, sessionID, tenantID, userID, hashRefreshToken(refreshToken), deviceID, ipHash, userAgent, refreshExp); err != nil {
 		return LoginResult{}, sharederrors.Internal("failed to create auth session")
 	}
 	return LoginResult{
@@ -193,6 +197,70 @@ func (s *Service) issueSessionTokens(ctx context.Context, tenantID, userID strin
 		TenantID:         tenantID,
 		Roles:            roles,
 	}, nil
+}
+
+func (s *Service) ListSessions(ctx context.Context, tenantID, userJWT string) ([]SessionInfo, error) {
+	userID, _, err := s.parseUserJWT(tenantID, userJWT)
+	if err != nil {
+		return nil, err
+	}
+	out, listErr := s.repo.ListSessionsByUser(ctx, tenantID, userID)
+	if listErr != nil {
+		return nil, sharederrors.Internal("failed to list sessions")
+	}
+	return out, nil
+}
+
+func (s *Service) RevokeSession(ctx context.Context, tenantID, userJWT, sessionID string) error {
+	userID, _, err := s.parseUserJWT(tenantID, userJWT)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return sharederrors.BadRequest("session_id is required")
+	}
+	if err := s.repo.RevokeSessionByID(ctx, tenantID, userID, sessionID); err != nil {
+		return sharederrors.Internal("failed to revoke session")
+	}
+	return nil
+}
+
+func (s *Service) RevokeOtherSessions(ctx context.Context, tenantID, userJWT, currentSessionRefreshToken string) error {
+	userID, _, err := s.parseUserJWT(tenantID, userJWT)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(currentSessionRefreshToken) == "" {
+		return sharederrors.BadRequest("refresh_token is required")
+	}
+	hash := hashRefreshToken(currentSessionRefreshToken)
+	sessionID, sessionUserID, _, _, err := s.repo.GetActiveSessionByRefreshHash(ctx, tenantID, hash)
+	if err != nil || sessionUserID != userID {
+		return sharederrors.BadRequest("invalid current session token")
+	}
+	if err := s.repo.RevokeOtherSessions(ctx, tenantID, userID, sessionID); err != nil {
+		return sharederrors.Internal("failed to revoke other sessions")
+	}
+	return nil
+}
+
+func (s *Service) parseUserJWT(tenantID, userJWT string) (string, []string, error) {
+	token := strings.TrimSpace(userJWT)
+	if token == "" {
+		return "", nil, sharederrors.BadRequest("X-User-JWT header is required")
+	}
+	keys := make([]middleware.JWTKey, 0, len(s.verifyKeys))
+	for _, k := range s.verifyKeys {
+		keys = append(keys, middleware.JWTKey{ID: k.ID, Secret: k.Secret})
+	}
+	claims, err := middleware.ParseAndVerifyUserJWTWithKeys(token, keys, time.Now().UTC())
+	if err != nil {
+		return "", nil, sharederrors.BadRequest("invalid user jwt")
+	}
+	if claims.TenantID != "" && !strings.EqualFold(claims.TenantID, tenantID) {
+		return "", nil, sharederrors.BadRequest("jwt tenant mismatch")
+	}
+	return claims.Subject, claims.Roles, nil
 }
 
 func signHS256JWT(key JWTSigningKey, payload map[string]any) (string, error) {
