@@ -35,6 +35,8 @@ make build
 - Sensitive routes require permission checks from signed user JWT (`X-User-JWT`) plus DB role mappings.
 - Legacy role-header bypass is disabled by default and can be toggled with `ALLOW_LEGACY_ROLE_BYPASS=true` for migration windows.
 - Identity now supports `login`, `refresh`, and `logout` session flows with hashed refresh tokens stored server-side.
+- JWT key rotation is supported via `AUTH_JWT_KEYSET` in `kid:secret` CSV format; the first key is used for signing and all keys are accepted for verification.
+- Refresh-token replay detection revokes compromised sessions when a previously-rotated token is reused.
 
 ## Rollback guidance
 

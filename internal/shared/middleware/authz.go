@@ -18,6 +18,7 @@ type PolicyRule struct {
 
 type PolicyOptions struct {
 	UserJWTSecret         string
+	UserJWTKeys           []JWTKey
 	AllowLegacyRoleBypass bool
 }
 
@@ -79,7 +80,13 @@ func resolveIdentity(r *http.Request, opts PolicyOptions) (string, []string, err
 		if secret == "" {
 			return "", nil, httpError("user jwt secret is not configured")
 		}
-		claims, err := ParseAndVerifyUserJWT(token, secret, time.Now().UTC())
+		var claims UserClaims
+		var err error
+		if len(opts.UserJWTKeys) > 0 {
+			claims, err = ParseAndVerifyUserJWTWithKeys(token, opts.UserJWTKeys, time.Now().UTC())
+		} else {
+			claims, err = ParseAndVerifyUserJWT(token, secret, time.Now().UTC())
+		}
 		if err != nil {
 			return "", nil, httpError(err.Error())
 		}

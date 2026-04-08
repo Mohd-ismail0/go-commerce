@@ -80,3 +80,15 @@ func TestLoadParsesAuthRefreshTTL(t *testing.T) {
 		t.Fatalf("expected AuthRefreshTTLMinutes=1440, got %d", cfg.AuthRefreshTTLMinutes)
 	}
 }
+
+func TestLoadAuthJWTKeyset(t *testing.T) {
+	t.Setenv("APP_ENV", "test")
+	t.Setenv("AUTH_JWT_KEYSET", "k1:s1,k2:s2")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.AuthJWTKeyset != "k1:s1,k2:s2" {
+		t.Fatalf("unexpected keyset: %s", cfg.AuthJWTKeyset)
+	}
+}

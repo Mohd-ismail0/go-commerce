@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"rewrite/internal/config"
@@ -60,6 +61,7 @@ func New(ctx context.Context) (*App, error) {
 	events.NewWorker(outbox, webhooks).Start(appCtx)
 	promotionsSvc := promotions.NewService(promotions.NewRepository(conn))
 	pricingSvc := pricing.NewService(pricing.NewRepository(conn), promotionsSvc)
+	jwtKeys := parseJWTKeys(cfg.AuthJWTSecret, cfg.AuthJWTKeyset)
 
 	s := server.New(
 		cfg.Port,
@@ -74,6 +76,7 @@ func New(ctx context.Context) (*App, error) {
 				{Prefix: "/metadata", PermissionCode: "metadata.manage"},
 			}, middleware.PolicyOptions{
 				UserJWTSecret:         cfg.AuthJWTSecret,
+				UserJWTKeys:           jwtKeys,
 				AllowLegacyRoleBypass: cfg.AllowLegacyRoleBypass,
 			}),
 			middleware.Timeout(time.Duration(cfg.HTTPTimeoutMS) * time.Millisecond),
@@ -91,7 +94,7 @@ func New(ctx context.Context) (*App, error) {
 		brands.NewHandler(brands.NewService(brands.NewRepository(conn))),
 		payments.NewHandler(payments.NewService(payments.NewRepository(conn)), cfg.WebhookPaymentSecret, cfg.AppEnv),
 		shipping.NewHandler(shipping.NewService(shipping.NewRepository(conn))),
-		identity.NewHandler(identity.NewService(identity.NewRepository(conn), cfg.AuthJWTSecret, cfg.AuthJWTTTLMinutes, cfg.AuthRefreshTTLMinutes)),
+		identity.NewHandler(identity.NewService(identity.NewRepository(conn), cfg.AuthJWTSecret, cfg.AuthJWTKeyset, cfg.AuthJWTTTLMinutes, cfg.AuthRefreshTTLMinutes)),
 		localization.NewHandler(localization.NewService(localization.NewRepository(conn))),
 		metadata.NewHandler(metadata.NewService(metadata.NewRepository(conn))),
 		search.NewHandler(search.NewService(search.NewRepository(conn))),
@@ -101,6 +104,30 @@ func New(ctx context.Context) (*App, error) {
 		dbConn: conn,
 		cancel: cancel,
 	}, nil
+}
+
+func parseJWTKeys(legacySecret, keyset string) []middleware.JWTKey {
+	out := []middleware.JWTKey{}
+	for _, pair := range strings.Split(strings.TrimSpace(keyset), ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		parts := strings.SplitN(pair, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		kid := strings.TrimSpace(parts[0])
+		secret := strings.TrimSpace(parts[1])
+		if kid == "" || secret == "" {
+			continue
+		}
+		out = append(out, middleware.JWTKey{ID: kid, Secret: secret})
+	}
+	if len(out) == 0 && strings.TrimSpace(legacySecret) != "" {
+		out = append(out, middleware.JWTKey{ID: "legacy", Secret: strings.TrimSpace(legacySecret)})
+	}
+	return out
 }
 
 func (a *App) Run() error {

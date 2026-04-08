@@ -13,6 +13,7 @@ type Config struct {
 	DatabaseURL           string
 	APIAuthToken          string
 	AuthJWTSecret         string
+	AuthJWTKeyset         string
 	AuthJWTTTLMinutes     int
 	AuthRefreshTTLMinutes int
 	AllowLegacyRoleBypass bool
@@ -53,6 +54,7 @@ func Load() (Config, error) {
 		DatabaseURL:           getEnv("DATABASE_URL", ""),
 		APIAuthToken:          getEnv("API_AUTH_TOKEN", ""),
 		AuthJWTSecret:         getEnv("AUTH_JWT_SECRET", ""),
+		AuthJWTKeyset:         getEnv("AUTH_JWT_KEYSET", ""),
 		AuthJWTTTLMinutes:     authJWTTTLMinutes,
 		AuthRefreshTTLMinutes: authRefreshTTLMinutes,
 		AllowLegacyRoleBypass: getEnvBool("ALLOW_LEGACY_ROLE_BYPASS", false),

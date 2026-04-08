@@ -18,21 +18,33 @@ import (
 
 type Service struct {
 	repo              *Repository
-	jwtSecret         string
+	signingKey        JWTSigningKey
+	verifyKeys        []JWTSigningKey
 	jwtTTLMinute      int
 	refreshTTLMinutes int
 }
 
-func NewService(repo *Repository, jwtSecret string, jwtTTLMinute, refreshTTLMinutes int) *Service {
+type JWTSigningKey struct {
+	ID     string
+	Secret string
+}
+
+func NewService(repo *Repository, jwtSecret, jwtKeyset string, jwtTTLMinute, refreshTTLMinutes int) *Service {
 	if jwtTTLMinute <= 0 {
 		jwtTTLMinute = 60
 	}
 	if refreshTTLMinutes <= 0 {
 		refreshTTLMinutes = 60 * 24 * 7
 	}
+	keys := parseJWTSigningKeys(jwtSecret, jwtKeyset)
+	primary := JWTSigningKey{ID: "legacy", Secret: strings.TrimSpace(jwtSecret)}
+	if len(keys) > 0 {
+		primary = keys[0]
+	}
 	return &Service{
 		repo:              repo,
-		jwtSecret:         strings.TrimSpace(jwtSecret),
+		signingKey:        primary,
+		verifyKeys:        keys,
 		jwtTTLMinute:      jwtTTLMinute,
 		refreshTTLMinutes: refreshTTLMinutes,
 	}
@@ -58,7 +70,7 @@ func (s *Service) List(ctx context.Context, tenantID string) ([]User, error) {
 }
 
 func (s *Service) Login(ctx context.Context, tenantID string, in LoginInput) (LoginResult, error) {
-	if strings.TrimSpace(s.jwtSecret) == "" {
+	if strings.TrimSpace(s.signingKey.Secret) == "" {
 		return LoginResult{}, sharederrors.Internal("auth jwt secret is not configured")
 	}
 	if strings.TrimSpace(in.Email) == "" || strings.TrimSpace(in.Password) == "" {
@@ -92,6 +104,10 @@ func (s *Service) Refresh(ctx context.Context, tenantID string, in RefreshInput)
 	sessionID, userID, exp, err := s.repo.GetActiveSessionByRefreshHash(ctx, tenantID, hash)
 	if err != nil {
 		if err == sql.ErrNoRows {
+			replayed, replayErr := s.repo.RevokeSessionByPreviousRefreshHash(ctx, tenantID, hash)
+			if replayErr == nil && replayed {
+				return LoginResult{}, sharederrors.Conflict("refresh token replay detected; session revoked")
+			}
 			return LoginResult{}, sharederrors.BadRequest("invalid refresh token")
 		}
 		return LoginResult{}, sharederrors.Internal("failed to load auth session")
@@ -104,7 +120,7 @@ func (s *Service) Refresh(ctx context.Context, tenantID string, in RefreshInput)
 		return LoginResult{}, sharederrors.Internal("failed to load user roles")
 	}
 	accessExp := time.Now().UTC().Add(time.Duration(s.jwtTTLMinute) * time.Minute)
-	access, err := signHS256JWT(s.jwtSecret, map[string]any{
+	access, err := signHS256JWT(s.signingKey, map[string]any{
 		"sub":       userID,
 		"tenant_id": tenantID,
 		"roles":     roles,
@@ -145,7 +161,7 @@ func (s *Service) Logout(ctx context.Context, tenantID string, in RefreshInput) 
 
 func (s *Service) issueSessionTokens(ctx context.Context, tenantID, userID string, roles []string) (LoginResult, error) {
 	accessExp := time.Now().UTC().Add(time.Duration(s.jwtTTLMinute) * time.Minute)
-	access, err := signHS256JWT(s.jwtSecret, map[string]any{
+	access, err := signHS256JWT(s.signingKey, map[string]any{
 		"sub":       userID,
 		"tenant_id": tenantID,
 		"roles":     roles,
@@ -179,8 +195,8 @@ func (s *Service) issueSessionTokens(ctx context.Context, tenantID, userID strin
 	}, nil
 }
 
-func signHS256JWT(secret string, payload map[string]any) (string, error) {
-	headerJSON, err := json.Marshal(map[string]any{"alg": "HS256", "typ": "JWT"})
+func signHS256JWT(key JWTSigningKey, payload map[string]any) (string, error) {
+	headerJSON, err := json.Marshal(map[string]any{"alg": "HS256", "typ": "JWT", "kid": key.ID})
 	if err != nil {
 		return "", err
 	}
@@ -191,7 +207,7 @@ func signHS256JWT(secret string, payload map[string]any) (string, error) {
 	head := base64.RawURLEncoding.EncodeToString(headerJSON)
 	body := base64.RawURLEncoding.EncodeToString(payloadJSON)
 	signingInput := head + "." + body
-	mac, err := computeHMACSHA256([]byte(secret), []byte(signingInput))
+	mac, err := computeHMACSHA256([]byte(key.Secret), []byte(signingInput))
 	if err != nil {
 		return "", err
 	}
@@ -224,4 +240,28 @@ func generateRandomToken(n int) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+func parseJWTSigningKeys(legacySecret, keyset string) []JWTSigningKey {
+	out := []JWTSigningKey{}
+	for _, pair := range strings.Split(strings.TrimSpace(keyset), ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		parts := strings.SplitN(pair, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		kid := strings.TrimSpace(parts[0])
+		secret := strings.TrimSpace(parts[1])
+		if kid == "" || secret == "" {
+			continue
+		}
+		out = append(out, JWTSigningKey{ID: kid, Secret: secret})
+	}
+	if len(out) == 0 && strings.TrimSpace(legacySecret) != "" {
+		out = append(out, JWTSigningKey{ID: "legacy", Secret: strings.TrimSpace(legacySecret)})
+	}
+	return out
 }

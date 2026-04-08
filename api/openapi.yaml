@@ -1152,7 +1152,7 @@ paths:
           description: Login success with token
   /identity/auth/refresh:
     post:
-      summary: Rotate refresh token and issue a new signed user JWT
+      summary: Rotate refresh token and issue a new signed user JWT (replay-safe)
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
@@ -1161,7 +1161,7 @@ paths:
           description: Refresh success with rotated refresh token
   /identity/auth/logout:
     post:
-      summary: Revoke active refresh token session
+      summary: Revoke active refresh token session (by refresh token hash)
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"

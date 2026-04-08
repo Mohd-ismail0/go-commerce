@@ -107,7 +107,7 @@ LIMIT 1
 func (r *Repository) RotateSessionRefreshToken(ctx context.Context, sessionID, newRefreshHash string, newExpiresAt time.Time) error {
 	_, err := r.db.ExecContext(ctx, `
 UPDATE auth_sessions
-SET refresh_token_hash = $2, expires_at = $3, updated_at = NOW()
+SET prev_refresh_token_hash = refresh_token_hash, refresh_token_hash = $2, expires_at = $3, updated_at = NOW()
 WHERE id = $1
 `, sessionID, newRefreshHash, newExpiresAt.UTC())
 	return err
@@ -120,4 +120,17 @@ SET revoked_at = NOW(), updated_at = NOW()
 WHERE tenant_id = $1 AND refresh_token_hash = $2 AND revoked_at IS NULL
 `, tenantID, refreshHash)
 	return err
+}
+
+func (r *Repository) RevokeSessionByPreviousRefreshHash(ctx context.Context, tenantID, refreshHash string) (bool, error) {
+	res, err := r.db.ExecContext(ctx, `
+UPDATE auth_sessions
+SET revoked_at = NOW(), compromised_at = NOW(), updated_at = NOW()
+WHERE tenant_id = $1 AND prev_refresh_token_hash = $2 AND revoked_at IS NULL
+`, tenantID, refreshHash)
+	if err != nil {
+		return false, err
+	}
+	affected, _ := res.RowsAffected()
+	return affected > 0, nil
 }
