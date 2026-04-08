@@ -40,6 +40,7 @@ PowerShell helper scripts are also available:
 powershell -ExecutionPolicy Bypass -File scripts/sqlc-generate.ps1
 powershell -ExecutionPolicy Bypass -File scripts/openapi-validate.ps1
 powershell -ExecutionPolicy Bypass -File scripts/integration-test.ps1
+powershell -ExecutionPolicy Bypass -File scripts/test-local.ps1
 ```
 
 ## Reliability notes
@@ -75,6 +76,14 @@ REDOCLY_CLI_VERSION=2.25.3 make openapi-check
 - `make integration-test` starts a temporary Postgres container, applies `internal/shared/db/schema.sql`, runs `./internal/integration/...`, and cleans up the container.
 - On Windows PowerShell, use `scripts/integration-test.ps1` for the same flow.
 - For manual runs, set `RUN_INTEGRATION=1` and a valid `DATABASE_URL`.
+
+## Local test wrapper
+
+- CI should continue using full `go test ./...`.
+- For locked-down local Windows hosts where policy may block specific test binaries, use:
+  - `make test-local` (bash environments), or
+  - `powershell -ExecutionPolicy Bypass -File scripts/test-local.ps1`.
+- You can override excluded packages with `GO_TEST_EXCLUDE` (comma-separated import paths).
 
 ## Rollback guidance
 
