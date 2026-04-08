@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"rewrite/internal/modules/pricing"
 	"rewrite/internal/shared/events"
 )
 
@@ -21,7 +22,11 @@ func (f *fakeRepo) UpsertLine(_ context.Context, _, _ string, line Line) (Line, 
 }
 
 func (f *fakeRepo) Recalculate(_ context.Context, _, _, checkoutID string) (Session, error) {
-	return Session{ID: checkoutID, TotalCents: 1200}, nil
+	return Session{ID: checkoutID, Currency: "USD", SubtotalCents: 1000, ShippingCents: 200, TotalCents: 1200}, nil
+}
+
+func (f *fakeRepo) UpdatePricing(_ context.Context, _, _, checkoutID string, taxCents, totalCents int64) (Session, error) {
+	return Session{ID: checkoutID, Currency: "USD", SubtotalCents: 1000, ShippingCents: 200, TaxCents: taxCents, TotalCents: totalCents}, nil
 }
 
 func (f *fakeRepo) Complete(_ context.Context, tenantID, regionID, checkoutID, orderID string) (OrderCreatedPayload, error) {
@@ -38,6 +43,17 @@ func (f *fakeRepo) Complete(_ context.Context, tenantID, regionID, checkoutID, o
 	}, nil
 }
 
+type fakeCalculator struct{}
+
+func (f *fakeCalculator) Calculate(_ context.Context, in pricing.CalculationInput) pricing.CalculationResult {
+	return pricing.CalculationResult{
+		BaseAmountCents: in.BaseAmountCents,
+		DiscountCents:   100,
+		TaxCents:        50,
+		TotalCents:      in.BaseAmountCents - 100 + 50,
+	}
+}
+
 func TestCompletePublishesOrderCreatedAndReturnsOrderID(t *testing.T) {
 	repo := &fakeRepo{}
 	bus := events.NewBus()
@@ -52,7 +68,7 @@ func TestCompletePublishesOrderCreatedAndReturnsOrderID(t *testing.T) {
 		}
 		done <- struct{}{}
 	})
-	svc := NewService(repo, bus)
+	svc := NewService(repo, bus, &fakeCalculator{})
 	result, err := svc.Complete(context.Background(), "tenant_a", "us", "chk_1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

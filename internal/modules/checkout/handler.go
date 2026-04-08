@@ -31,6 +31,10 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		ID         string `json:"id"`
 		CustomerID string `json:"customer_id"`
 		Currency   string `json:"currency"`
+		VoucherCode string `json:"voucher_code"`
+		PromotionID string `json:"promotion_id"`
+		TaxClassID  string `json:"tax_class_id"`
+		CountryCode string `json:"country_code"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		utils.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -46,6 +50,10 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		RegionID:   middleware.RegionIDFromContext(r.Context()),
 		CustomerID: req.CustomerID,
 		Currency:   req.Currency,
+		VoucherCode: req.VoucherCode,
+		PromotionID: req.PromotionID,
+		TaxClassID:  req.TaxClassID,
+		CountryCode: req.CountryCode,
 	})
 	if err != nil {
 		utils.WriteError(w, err)

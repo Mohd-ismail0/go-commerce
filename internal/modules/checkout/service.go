@@ -5,18 +5,24 @@ import (
 	"errors"
 	"strings"
 
+	"rewrite/internal/modules/pricing"
 	sharederrors "rewrite/internal/shared/errors"
 	"rewrite/internal/shared/events"
 	"rewrite/internal/shared/utils"
 )
 
 type Service struct {
-	repo Repository
-	bus  *events.Bus
+	repo       Repository
+	bus        *events.Bus
+	calculator PricingCalculator
 }
 
-func NewService(repo Repository, bus *events.Bus) *Service {
-	return &Service{repo: repo, bus: bus}
+type PricingCalculator interface {
+	Calculate(ctx context.Context, in pricing.CalculationInput) pricing.CalculationResult
+}
+
+func NewService(repo Repository, bus *events.Bus, calculator PricingCalculator) *Service {
+	return &Service{repo: repo, bus: bus, calculator: calculator}
 }
 
 func (s *Service) CreateSession(ctx context.Context, in Session) (Session, error) {
@@ -54,10 +60,30 @@ func (s *Service) Recalculate(ctx context.Context, tenantID, regionID, checkoutI
 		}
 		return Session{}, sharederrors.Internal("failed to recalculate checkout totals")
 	}
-	return session, nil
+	if s.calculator == nil {
+		return session, nil
+	}
+	calculated := s.calculator.Calculate(ctx, pricing.CalculationInput{
+		TenantID:        tenantID,
+		RegionID:        regionID,
+		Currency:        session.Currency,
+		BaseAmountCents: session.SubtotalCents + session.ShippingCents,
+		VoucherCode:     strings.TrimSpace(session.VoucherCode),
+		PromotionID:     strings.TrimSpace(session.PromotionID),
+		TaxClassID:      strings.TrimSpace(session.TaxClassID),
+		CountryCode:     strings.TrimSpace(session.CountryCode),
+	})
+	updated, updateErr := s.repo.UpdatePricing(ctx, tenantID, regionID, checkoutID, calculated.TaxCents, calculated.TotalCents)
+	if updateErr != nil {
+		return Session{}, sharederrors.Internal("failed to apply checkout pricing")
+	}
+	return updated, nil
 }
 
 func (s *Service) Complete(ctx context.Context, tenantID, regionID, checkoutID string) (CompleteResult, error) {
+	if _, err := s.Recalculate(ctx, tenantID, regionID, checkoutID); err != nil {
+		return CompleteResult{}, err
+	}
 	orderID := utils.NewID("ord")
 	saved, err := s.repo.Complete(ctx, tenantID, regionID, checkoutID, orderID)
 	if err != nil {
@@ -68,6 +94,9 @@ func (s *Service) Complete(ctx context.Context, tenantID, regionID, checkoutID s
 			return CompleteResult{}, sharederrors.BadRequest(err.Error())
 		}
 		if errors.Is(err, ErrInsufficientStock) {
+			return CompleteResult{}, sharederrors.Conflict(err.Error())
+		}
+		if errors.Is(err, ErrVoucherUnavailable) {
 			return CompleteResult{}, sharederrors.Conflict(err.Error())
 		}
 		return CompleteResult{}, sharederrors.Internal("failed to complete checkout")

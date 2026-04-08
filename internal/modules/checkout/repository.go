@@ -14,11 +14,13 @@ var ErrSessionNotFound = errors.New("checkout session not found")
 var ErrSessionNotOpen = errors.New("checkout session is not open")
 var ErrCheckoutEmpty = errors.New("checkout has no lines")
 var ErrInsufficientStock = errors.New("insufficient stock for checkout line")
+var ErrVoucherUnavailable = errors.New("voucher is unavailable")
 
 type Repository interface {
 	CreateSession(ctx context.Context, in Session) (Session, error)
 	UpsertLine(ctx context.Context, tenantID, regionID string, line Line) (Line, error)
 	Recalculate(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error)
+	UpdatePricing(ctx context.Context, tenantID, regionID, checkoutID string, taxCents, totalCents int64) (Session, error)
 	Complete(ctx context.Context, tenantID, regionID, checkoutID, orderID string) (OrderCreatedPayload, error)
 }
 
@@ -32,10 +34,10 @@ func NewRepository(conn *sql.DB) Repository {
 
 func (r *PostgresRepository) CreateSession(ctx context.Context, in Session) (Session, error) {
 	row := r.db.QueryRowContext(ctx, `
-INSERT INTO checkout_sessions (id, tenant_id, region_id, customer_id, status, currency, subtotal_cents, shipping_cents, tax_cents, total_cents, created_at, updated_at)
-VALUES ($1,$2,$3,$4,$5,$6,0,0,0,0,NOW(),NOW())
-RETURNING id, tenant_id, region_id, customer_id, status, currency, subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
-`, in.ID, in.TenantID, in.RegionID, in.CustomerID, in.Status, in.Currency)
+INSERT INTO checkout_sessions (id, tenant_id, region_id, customer_id, status, currency, voucher_code, promotion_id, tax_class_id, country_code, subtotal_cents, shipping_cents, tax_cents, total_cents, created_at, updated_at)
+VALUES ($1,$2,$3,$4,$5,$6,NULLIF($7,''),NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),0,0,0,0,NOW(),NOW())
+RETURNING id, tenant_id, region_id, customer_id, status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+`, in.ID, in.TenantID, in.RegionID, in.CustomerID, in.Status, in.Currency, in.VoucherCode, in.PromotionID, in.TaxClassID, in.CountryCode)
 	return scanSession(row)
 }
 
@@ -82,6 +84,18 @@ WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 	return r.getSession(ctx, tenantID, regionID, checkoutID)
 }
 
+func (r *PostgresRepository) UpdatePricing(ctx context.Context, tenantID, regionID, checkoutID string, taxCents, totalCents int64) (Session, error) {
+	_, err := r.db.ExecContext(ctx, `
+UPDATE checkout_sessions
+SET tax_cents = $4, total_cents = $5, updated_at = NOW()
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+`, checkoutID, tenantID, regionID, taxCents, totalCents)
+	if err != nil {
+		return Session{}, err
+	}
+	return r.getSession(ctx, tenantID, regionID, checkoutID)
+}
+
 func (r *PostgresRepository) Complete(ctx context.Context, tenantID, regionID, checkoutID, orderID string) (OrderCreatedPayload, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -93,7 +107,7 @@ func (r *PostgresRepository) Complete(ctx context.Context, tenantID, regionID, c
 
 	var session Session
 	row := tx.QueryRowContext(ctx, `
-SELECT id, tenant_id, region_id, customer_id, status, currency, subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+SELECT id, tenant_id, region_id, customer_id, status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
 FROM checkout_sessions
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 FOR UPDATE
@@ -175,6 +189,33 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),NOW())
 		}
 	}
 
+	if session.VoucherCode != "" {
+		consumeVoucher := tx.QueryRowContext(ctx, `
+UPDATE vouchers
+SET used_count = used_count + 1, updated_at = NOW()
+WHERE id = (
+  SELECT id
+  FROM vouchers
+  WHERE tenant_id = $1
+    AND region_id = $2
+    AND code = $3
+    AND currency = $4
+    AND (starts_at IS NULL OR starts_at <= NOW())
+    AND (ends_at IS NULL OR ends_at >= NOW())
+    AND (usage_limit IS NULL OR used_count < usage_limit)
+  LIMIT 1
+)
+RETURNING id
+`, tenantID, regionID, session.VoucherCode, session.Currency)
+		var voucherID string
+		if scanErr := consumeVoucher.Scan(&voucherID); scanErr != nil {
+			if errors.Is(scanErr, sql.ErrNoRows) {
+				return OrderCreatedPayload{}, ErrVoucherUnavailable
+			}
+			return OrderCreatedPayload{}, scanErr
+		}
+	}
+
 	if _, err = tx.ExecContext(ctx, `
 INSERT INTO orders (id, tenant_id, region_id, customer_id, status, total_cents, currency, checkout_id, created_at, updated_at)
 VALUES ($1,$2,$3,$4,'created',$5,$6,$7,NOW(),NOW())
@@ -253,7 +294,7 @@ SELECT 1 FROM checkout_sessions WHERE id = $1 AND tenant_id = $2 AND region_id =
 
 func (r *PostgresRepository) getSession(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error) {
 	row := r.db.QueryRowContext(ctx, `
-SELECT id, tenant_id, region_id, customer_id, status, currency, subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+SELECT id, tenant_id, region_id, customer_id, status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
 FROM checkout_sessions
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 `, checkoutID, tenantID, regionID)
@@ -283,6 +324,10 @@ func scanSessionInto(row scanner, out *Session) error {
 		&out.CustomerID,
 		&out.Status,
 		&out.Currency,
+		&out.VoucherCode,
+		&out.PromotionID,
+		&out.TaxClassID,
+		&out.CountryCode,
 		&out.SubtotalCents,
 		&out.ShippingCents,
 		&out.TaxCents,

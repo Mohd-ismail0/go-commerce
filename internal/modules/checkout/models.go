@@ -7,6 +7,10 @@ type Session struct {
 	CustomerID    string `json:"customer_id"`
 	Status        string `json:"status"`
 	Currency      string `json:"currency"`
+	VoucherCode   string `json:"voucher_code,omitempty"`
+	PromotionID   string `json:"promotion_id,omitempty"`
+	TaxClassID    string `json:"tax_class_id,omitempty"`
+	CountryCode   string `json:"country_code,omitempty"`
 	SubtotalCents int64  `json:"subtotal_cents"`
 	ShippingCents int64  `json:"shipping_cents"`
 	TaxCents      int64  `json:"tax_cents"`

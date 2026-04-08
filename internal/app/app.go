@@ -92,7 +92,7 @@ func New(ctx context.Context) (*App, error) {
 			middleware.BodyLimit(cfg.HTTPMaxBodyBytes),
 		},
 		catalog.NewHandler(catalog.NewService(catalog.NewRepository(conn), bus)),
-		checkout.NewHandler(checkout.NewService(checkout.NewRepository(conn), bus)),
+		checkout.NewHandler(checkout.NewService(checkout.NewRepository(conn), bus, pricingSvc)),
 		orders.NewHandler(orders.NewService(orders.NewRepository(conn), bus, pricingSvc)),
 		fulfillments.NewHandler(fulfillments.NewService(fulfillments.NewRepository(conn))),
 		customers.NewHandler(customers.NewService(customers.NewRepository(conn))),
