@@ -71,7 +71,10 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	nextCursor := ""
 	if len(items) > 0 {
-		nextCursor = time.Now().UTC().Format(time.RFC3339Nano)
+		last := items[len(items)-1]
+		if strings.TrimSpace(last.CreatedAt) != "" {
+			nextCursor = last.CreatedAt
+		}
 	}
 	utils.JSON(w, http.StatusOK, map[string]any{
 		"items": items,

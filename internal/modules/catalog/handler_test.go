@@ -3,6 +3,7 @@ package catalog
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -226,5 +227,39 @@ func TestAssignProductToCollectionEndpoint(t *testing.T) {
 	}
 	if repo.collectionProducts == nil || !repo.collectionProducts["c1"]["p1"] {
 		t.Fatalf("expected product to be assigned to collection")
+	}
+}
+
+func TestProductsListUsesStableCreatedAtCursor(t *testing.T) {
+	repo := &catalogFakeRepo{
+		items: []Product{
+			{ID: "p1", TenantID: "tenant_a", CreatedAt: "2026-04-08T10:00:00Z"},
+			{ID: "p2", TenantID: "tenant_a", CreatedAt: "2026-04-08T11:00:00Z"},
+		},
+	}
+	h := NewHandler(NewService(repo, events.NewBus()))
+	r := chi.NewRouter()
+	r.Use(middleware.TenantRegion("public", "global"))
+	h.RegisterRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/products/", nil)
+	req.Header.Set("X-Tenant-ID", "tenant_a")
+	req.Header.Set("X-Region-ID", "global")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rr.Code)
+	}
+	var body struct {
+		Pagination struct {
+			NextCursor string `json:"next_cursor"`
+		} `json:"pagination"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if body.Pagination.NextCursor != "2026-04-08T11:00:00Z" {
+		t.Fatalf("expected stable next cursor, got %q", body.Pagination.NextCursor)
 	}
 }

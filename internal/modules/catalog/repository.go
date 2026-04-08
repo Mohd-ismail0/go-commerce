@@ -52,6 +52,7 @@ func (r *PostgresRepository) Upsert(ctx context.Context, product Product, idempo
 					Name:       existing.Name,
 					Currency:   existing.Currency,
 					PriceCents: existing.PriceCents,
+					CreatedAt:  existing.CreatedAt.UTC().Format(time.RFC3339Nano),
 				}, nil
 			}
 		}
@@ -84,6 +85,7 @@ func (r *PostgresRepository) Upsert(ctx context.Context, product Product, idempo
 		Name:       row.Name,
 		Currency:   row.Currency,
 		PriceCents: row.PriceCents,
+		CreatedAt:  row.CreatedAt.UTC().Format(time.RFC3339Nano),
 	}, nil
 }
 
@@ -108,6 +110,7 @@ func (r *PostgresRepository) List(ctx context.Context, tenantID, regionID, sku s
 			Name:       row.Name,
 			Currency:   row.Currency,
 			PriceCents: row.PriceCents,
+			CreatedAt:  row.CreatedAt.UTC().Format(time.RFC3339Nano),
 		})
 	}
 	return out, nil

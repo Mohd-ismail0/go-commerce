@@ -8,6 +8,7 @@ type Product struct {
 	Name       string `json:"name"`
 	Currency   string `json:"currency"`
 	PriceCents int64  `json:"price_cents"`
+	CreatedAt  string `json:"created_at,omitempty"`
 }
 
 func (p Product) GetTenantID() string {
