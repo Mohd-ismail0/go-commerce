@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Rewrite Commerce API
-  version: 0.3.0
+  version: 0.4.0
 servers:
   - url: http://localhost:8080
 security:
@@ -18,6 +18,11 @@ components:
       in: header
       name: X-Role
       description: Role header baseline for sensitive routes.
+    UserHeaderAuth:
+      type: apiKey
+      in: header
+      name: X-User-ID
+      description: User id for database-backed permission checks (roles joined to permissions).
   parameters:
     TenantHeader:
       in: header
@@ -39,6 +44,18 @@ components:
         type: string
         minLength: 8
         maxLength: 128
+    UserIdHeader:
+      in: header
+      name: X-User-ID
+      required: false
+      schema:
+        type: string
+    RegionIdQuery:
+      in: query
+      name: region_id
+      required: false
+      schema:
+        type: string
   schemas:
     ErrorResponse:
       type: object
@@ -907,6 +924,7 @@ paths:
       security:
         - ApiTokenAuth: []
           RoleHeaderAuth: []
+          UserHeaderAuth: []
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
@@ -914,9 +932,162 @@ paths:
       responses:
         "201":
           description: Payment saved
+  /payments/{id}:
+    get:
+      summary: Get payment by id
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Payment
+  /payments/{id}/transactions:
+    get:
+      summary: List payment transactions
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Transactions
+  /payments/{id}/capture:
+    post:
+      summary: Capture authorized funds
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - $ref: "#/components/parameters/IdempotencyHeader"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Capture result
+  /payments/{id}/refund:
+    post:
+      summary: Refund captured funds
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - $ref: "#/components/parameters/IdempotencyHeader"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Refund result
+  /payments/{id}/void:
+    post:
+      summary: Void authorization before capture
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - $ref: "#/components/parameters/IdempotencyHeader"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Void result
+  /webhooks/payments/{tenant_id}/{provider}:
+    post:
+      summary: Provider payment webhook (HMAC-signed when WEBHOOK_PAYMENT_SECRET is set)
+      parameters:
+        - name: tenant_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/RegionIdQuery"
+      responses:
+        "200":
+          description: Webhook processed
+  /shipping/zones:
+    get:
+      summary: List shipping zones
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Zones list
+    post:
+      summary: Create or update shipping zone
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "201":
+          description: Zone saved
+  /shipping/resolve:
+    post:
+      summary: Resolve eligible shipping methods for country, channel, postal prefix, and order total
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Eligible methods
   /shipping/methods:
     get:
       summary: List shipping methods
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
@@ -925,6 +1096,10 @@ paths:
           description: Shipping method list
     post:
       summary: Create or update shipping method
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"

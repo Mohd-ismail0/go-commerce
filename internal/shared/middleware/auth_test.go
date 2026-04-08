@@ -6,6 +6,21 @@ import (
 	"testing"
 )
 
+func TestAPITokenAllowsWebhookRoutesWithoutToken(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	h := APIToken("expected-token")(next)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/payments/public/stripe", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rr.Code)
+	}
+}
+
 func TestAPITokenAllowsHealthRoutesWithoutToken(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

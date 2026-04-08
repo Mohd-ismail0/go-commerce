@@ -12,7 +12,7 @@ type RoleValidator func(role string, r *http.Request) bool
 func APIToken(expectedToken string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if isHealthRoute(r.URL.Path) {
+			if isPublicRoute(r.URL.Path) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -64,7 +64,7 @@ func RoleGuard(hooks map[string]RoleValidator) func(http.Handler) http.Handler {
 				return
 			}
 
-			validator := matchRoleValidator(path, hooks)
+			validator := MatchRoleValidator(path, hooks)
 			if validator != nil && !validator(role, r) {
 				utils.JSON(w, http.StatusForbidden, map[string]any{
 					"code":    "forbidden",
@@ -87,11 +87,20 @@ func isHealthRoute(path string) bool {
 	return path == "/healthz" || path == "/readyz"
 }
 
-func requiresRole(path string, hooks map[string]RoleValidator) bool {
-	return matchRoleValidator(path, hooks) != nil
+// isPublicRoute includes health checks and provider webhook callbacks (verified separately).
+func isPublicRoute(path string) bool {
+	path = strings.TrimSpace(path)
+	if isHealthRoute(path) {
+		return true
+	}
+	return strings.HasPrefix(path, "/webhooks/")
 }
 
-func matchRoleValidator(path string, hooks map[string]RoleValidator) RoleValidator {
+func requiresRole(path string, hooks map[string]RoleValidator) bool {
+	return MatchRoleValidator(path, hooks) != nil
+}
+
+func MatchRoleValidator(path string, hooks map[string]RoleValidator) RoleValidator {
 	for prefix, validator := range hooks {
 		if strings.HasPrefix(path, prefix) {
 			return validator
