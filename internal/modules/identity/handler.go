@@ -18,6 +18,9 @@ func NewHandler(svc *Service) *Handler {
 }
 
 func (h *Handler) RegisterRoutes(r chi.Router) {
+	r.Route("/identity/auth", func(r chi.Router) {
+		r.Post("/login", h.login)
+	})
 	r.Route("/identity/users", func(r chi.Router) {
 		r.Get("/", h.list)
 		r.Post("/", h.save)
@@ -25,7 +28,12 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
-	utils.JSON(w, http.StatusOK, h.svc.List(r.Context(), middleware.TenantIDFromContext(r.Context())))
+	items, err := h.svc.List(r.Context(), middleware.TenantIDFromContext(r.Context()))
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, items)
 }
 
 func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
@@ -39,5 +47,24 @@ func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 	if item.ID == "" {
 		item.ID = utils.NewID("usr")
 	}
-	utils.JSON(w, http.StatusCreated, h.svc.Save(r.Context(), item))
+	saved, err := h.svc.Save(r.Context(), item)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusCreated, saved)
+}
+
+func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
+	var in LoginInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
+		return
+	}
+	res, err := h.svc.Login(r.Context(), middleware.TenantIDFromContext(r.Context()), in)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, res)
 }

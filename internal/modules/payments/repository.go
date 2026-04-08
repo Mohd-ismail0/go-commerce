@@ -153,6 +153,28 @@ func (r *Repository) SaveIdempotency(ctx context.Context, tenantID, scope, key, 
 	return r.q.SaveIdempotencyResource(ctx, tenantID, scope, key, resourceID)
 }
 
+func (r *Repository) ListForRegion(ctx context.Context, tenantID, regionID string) ([]Payment, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT id, tenant_id, region_id, COALESCE(order_id,''), COALESCE(checkout_id,''), provider, status, amount_cents, currency, COALESCE(external_reference,'')
+FROM payments
+WHERE tenant_id = $1 AND region_id = $2
+ORDER BY created_at DESC
+`, tenantID, regionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Payment{}
+	for rows.Next() {
+		var item Payment
+		if err := rows.Scan(&item.ID, &item.TenantID, &item.RegionID, &item.OrderID, &item.CheckoutID, &item.Provider, &item.Status, &item.AmountCents, &item.Currency, &item.ExternalReference); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
 func nullable(v string) any {
 	if strings.TrimSpace(v) == "" {
 		return nil

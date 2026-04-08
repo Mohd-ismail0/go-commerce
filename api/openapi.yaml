@@ -932,6 +932,18 @@ paths:
       responses:
         "201":
           description: Payment saved
+  /payments/reconcile:
+    get:
+      summary: Reconcile payment ledger totals against payment status
+      security:
+        - ApiTokenAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Reconciliation report
   /payments/{id}:
     get:
       summary: Get payment by id
@@ -1111,7 +1123,7 @@ paths:
       summary: List users
       security:
         - ApiTokenAuth: []
-          RoleHeaderAuth: []
+          UserHeaderAuth: []
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
@@ -1122,13 +1134,22 @@ paths:
       summary: Create or update user
       security:
         - ApiTokenAuth: []
-          RoleHeaderAuth: []
+          UserHeaderAuth: []
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
       responses:
         "201":
           description: User saved
+  /identity/auth/login:
+    post:
+      summary: Login and issue signed user JWT
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Login success with token
   /translations:
     post:
       summary: Upsert translation

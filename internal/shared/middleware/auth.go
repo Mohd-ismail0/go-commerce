@@ -93,6 +93,9 @@ func isPublicRoute(path string) bool {
 	if isHealthRoute(path) {
 		return true
 	}
+	if path == "/identity/auth/login" {
+		return true
+	}
 	return strings.HasPrefix(path, "/webhooks/")
 }
 

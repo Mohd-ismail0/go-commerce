@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"time"
 
 	sharederrors "rewrite/internal/shared/errors"
 	"rewrite/internal/shared/utils"
@@ -109,15 +110,15 @@ func (s *Service) Capture(ctx context.Context, tenantID, paymentID string, in Am
 	}
 
 	tx := PaymentTransaction{
-		ID:              utils.NewID("ptx"),
-		TenantID:        p.TenantID,
-		RegionID:        p.RegionID,
-		PaymentID:       p.ID,
-		EventType:       EventCapture,
-		AmountCents:     amount,
-		Currency:        p.Currency,
-		Success:         true,
-		RawPayload:      map[string]any{"op": "capture"},
+		ID:          utils.NewID("ptx"),
+		TenantID:    p.TenantID,
+		RegionID:    p.RegionID,
+		PaymentID:   p.ID,
+		EventType:   EventCapture,
+		AmountCents: amount,
+		Currency:    p.Currency,
+		Success:     true,
+		RawPayload:  map[string]any{"op": "capture"},
 	}
 	savedTx, err := s.repo.InsertTransaction(ctx, tx)
 	if err != nil {
@@ -175,15 +176,15 @@ func (s *Service) Refund(ctx context.Context, tenantID, paymentID string, in Amo
 	}
 
 	tx := PaymentTransaction{
-		ID:         utils.NewID("ptx"),
-		TenantID:   p.TenantID,
-		RegionID:   p.RegionID,
-		PaymentID:  p.ID,
-		EventType:  EventRefund,
+		ID:          utils.NewID("ptx"),
+		TenantID:    p.TenantID,
+		RegionID:    p.RegionID,
+		PaymentID:   p.ID,
+		EventType:   EventRefund,
 		AmountCents: amount,
-		Currency:   p.Currency,
-		Success:    true,
-		RawPayload: map[string]any{"op": "refund"},
+		Currency:    p.Currency,
+		Success:     true,
+		RawPayload:  map[string]any{"op": "refund"},
 	}
 	savedTx, err := s.repo.InsertTransaction(ctx, tx)
 	if err != nil {
@@ -233,15 +234,15 @@ func (s *Service) Void(ctx context.Context, tenantID, paymentID string, idempote
 	}
 
 	tx := PaymentTransaction{
-		ID:         utils.NewID("ptx"),
-		TenantID:   p.TenantID,
-		RegionID:   p.RegionID,
-		PaymentID:  p.ID,
-		EventType:  EventVoid,
+		ID:          utils.NewID("ptx"),
+		TenantID:    p.TenantID,
+		RegionID:    p.RegionID,
+		PaymentID:   p.ID,
+		EventType:   EventVoid,
 		AmountCents: p.AmountCents,
-		Currency:   p.Currency,
-		Success:    true,
-		RawPayload: map[string]any{"op": "void"},
+		Currency:    p.Currency,
+		Success:     true,
+		RawPayload:  map[string]any{"op": "void"},
 	}
 	savedTx, err := s.repo.InsertTransaction(ctx, tx)
 	if err != nil {
@@ -442,4 +443,53 @@ func pickCurrency(in, fallback string) string {
 		return strings.TrimSpace(in)
 	}
 	return fallback
+}
+
+func (s *Service) Reconcile(ctx context.Context, tenantID, regionID string) (ReconciliationReport, error) {
+	payments, err := s.repo.ListForRegion(ctx, tenantID, regionID)
+	if err != nil {
+		return ReconciliationReport{}, sharederrors.Internal("failed to load payments for reconciliation")
+	}
+	items := make([]ReconciliationItem, 0)
+	for _, p := range payments {
+		captured, refunded, err := s.repo.Totals(ctx, p.ID)
+		if err != nil {
+			return ReconciliationReport{}, sharederrors.Internal("failed to aggregate payment totals")
+		}
+		issues := detectReconciliationIssues(p, captured, refunded)
+		for _, issue := range issues {
+			items = append(items, ReconciliationItem{
+				PaymentID:       p.ID,
+				Status:          p.Status,
+				AuthorizedCents: p.AmountCents,
+				CapturedCents:   captured,
+				RefundedCents:   refunded,
+				Issue:           issue,
+			})
+		}
+	}
+	return ReconciliationReport{
+		GeneratedAt: time.Now().UTC().Unix(),
+		Items:       items,
+	}, nil
+}
+
+func detectReconciliationIssues(p Payment, captured, refunded int64) []string {
+	out := []string{}
+	if captured > p.AmountCents {
+		out = append(out, "captured_exceeds_authorized")
+	}
+	if refunded > captured {
+		out = append(out, "refunded_exceeds_captured")
+	}
+	if p.Status == StatusCaptured && captured < p.AmountCents {
+		out = append(out, "status_captured_but_partial_capture_totals")
+	}
+	if p.Status == StatusRefunded && refunded < captured {
+		out = append(out, "status_refunded_but_partial_refund_totals")
+	}
+	if p.Status == StatusVoided && captured > 0 {
+		out = append(out, "status_voided_with_capture_activity")
+	}
+	return out
 }

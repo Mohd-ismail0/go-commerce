@@ -13,6 +13,7 @@ type Config struct {
 	DatabaseURL           string
 	APIAuthToken          string
 	AuthJWTSecret         string
+	AuthJWTTTLMinutes     int
 	AllowLegacyRoleBypass bool
 	DefaultRegionID       string
 	DefaultTenantID       string
@@ -36,6 +37,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	authJWTTTLMinutes, err := getEnvIntInRange("AUTH_JWT_TTL_MINUTES", 60, 1, 10080)
+	if err != nil {
+		return Config{}, err
+	}
 
 	cfg := Config{
 		AppEnv:                getEnv("APP_ENV", "development"),
@@ -43,6 +48,7 @@ func Load() (Config, error) {
 		DatabaseURL:           getEnv("DATABASE_URL", ""),
 		APIAuthToken:          getEnv("API_AUTH_TOKEN", ""),
 		AuthJWTSecret:         getEnv("AUTH_JWT_SECRET", ""),
+		AuthJWTTTLMinutes:     authJWTTTLMinutes,
 		AllowLegacyRoleBypass: getEnvBool("ALLOW_LEGACY_ROLE_BYPASS", false),
 		DefaultRegionID:       getEnv("DEFAULT_REGION_ID", "global"),
 		DefaultTenantID:       getEnv("DEFAULT_TENANT_ID", "public"),

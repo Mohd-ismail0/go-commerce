@@ -15,27 +15,27 @@ type Payment struct {
 
 // PaymentTransaction records authorize/capture/refund/void and provider callbacks.
 type PaymentTransaction struct {
-	ID               string         `json:"id"`
-	TenantID         string         `json:"tenant_id"`
-	RegionID         string         `json:"region_id"`
-	PaymentID        string         `json:"payment_id"`
-	EventType        string         `json:"event_type"`
-	AmountCents      int64          `json:"amount_cents"`
-	Currency         string         `json:"currency"`
-	Success          bool           `json:"success"`
-	ProviderEventID  string         `json:"provider_event_id,omitempty"`
-	RawPayload       map[string]any `json:"raw_payload,omitempty"`
+	ID              string         `json:"id"`
+	TenantID        string         `json:"tenant_id"`
+	RegionID        string         `json:"region_id"`
+	PaymentID       string         `json:"payment_id"`
+	EventType       string         `json:"event_type"`
+	AmountCents     int64          `json:"amount_cents"`
+	Currency        string         `json:"currency"`
+	Success         bool           `json:"success"`
+	ProviderEventID string         `json:"provider_event_id,omitempty"`
+	RawPayload      map[string]any `json:"raw_payload,omitempty"`
 }
 
 const (
-	StatusPending            = "pending"
-	StatusAuthorized         = "authorized"
-	StatusPartiallyCaptured  = "partially_captured"
-	StatusCaptured           = "captured"
-	StatusPartiallyRefunded  = "partially_refunded"
-	StatusRefunded           = "refunded"
-	StatusVoided             = "voided"
-	StatusFailed             = "failed"
+	StatusPending           = "pending"
+	StatusAuthorized        = "authorized"
+	StatusPartiallyCaptured = "partially_captured"
+	StatusCaptured          = "captured"
+	StatusPartiallyRefunded = "partially_refunded"
+	StatusRefunded          = "refunded"
+	StatusVoided            = "voided"
+	StatusFailed            = "failed"
 )
 
 const (
@@ -63,4 +63,18 @@ type WebhookInput struct {
 	ProviderEventID   string         `json:"provider_event_id"`
 	ExternalReference string         `json:"external_reference,omitempty"`
 	Raw               map[string]any `json:"raw,omitempty"`
+}
+
+type ReconciliationItem struct {
+	PaymentID       string `json:"payment_id"`
+	Status          string `json:"status"`
+	AuthorizedCents int64  `json:"authorized_cents"`
+	CapturedCents   int64  `json:"captured_cents"`
+	RefundedCents   int64  `json:"refunded_cents"`
+	Issue           string `json:"issue"`
+}
+
+type ReconciliationReport struct {
+	GeneratedAt int64                `json:"generated_at"`
+	Items       []ReconciliationItem `json:"items"`
 }

@@ -91,7 +91,7 @@ func New(ctx context.Context) (*App, error) {
 		brands.NewHandler(brands.NewService(brands.NewRepository(conn))),
 		payments.NewHandler(payments.NewService(payments.NewRepository(conn)), cfg.WebhookPaymentSecret, cfg.AppEnv),
 		shipping.NewHandler(shipping.NewService(shipping.NewRepository(conn))),
-		identity.NewHandler(identity.NewService(identity.NewRepository(conn))),
+		identity.NewHandler(identity.NewService(identity.NewRepository(conn), cfg.AuthJWTSecret, cfg.AuthJWTTTLMinutes)),
 		localization.NewHandler(localization.NewService(localization.NewRepository(conn))),
 		metadata.NewHandler(metadata.NewService(metadata.NewRepository(conn))),
 		search.NewHandler(search.NewService(search.NewRepository(conn))),

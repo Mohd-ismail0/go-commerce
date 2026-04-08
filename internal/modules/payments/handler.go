@@ -24,6 +24,7 @@ func NewHandler(svc *Service, webhookSecret, appEnv string) *Handler {
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Route("/payments", func(r chi.Router) {
 		r.Get("/", h.list)
+		r.Get("/reconcile", h.reconcile)
 		r.Post("/", h.save)
 		r.Get("/{id}", h.get)
 		r.Get("/{id}/transactions", h.transactions)
@@ -32,6 +33,19 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Post("/{id}/void", h.void)
 	})
 	r.Post("/webhooks/payments/{tenant_id}/{provider}", h.webhook)
+}
+
+func (h *Handler) reconcile(w http.ResponseWriter, r *http.Request) {
+	report, err := h.svc.Reconcile(
+		r.Context(),
+		middleware.TenantIDFromContext(r.Context()),
+		middleware.RegionIDFromContext(r.Context()),
+	)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, report)
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
