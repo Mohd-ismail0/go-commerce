@@ -1,0 +1,71 @@
+package webhooks
+
+import (
+	"context"
+	"database/sql"
+	"time"
+)
+
+type Repository struct {
+	db *sql.DB
+}
+
+func NewRepository(db *sql.DB) *Repository {
+	return &Repository{db: db}
+}
+
+func (r *Repository) Save(ctx context.Context, in Subscription) (Subscription, error) {
+	row := r.db.QueryRowContext(ctx, `
+INSERT INTO webhook_subscriptions (id, tenant_id, region_id, app_id, event_name, endpoint_url, secret, is_active, created_at, updated_at)
+VALUES ($1,$2,$3,NULLIF($4,''),$5,$6,NULLIF($7,''),$8,NOW(),NOW())
+ON CONFLICT (id) DO UPDATE SET
+  tenant_id = EXCLUDED.tenant_id,
+  region_id = EXCLUDED.region_id,
+  app_id = EXCLUDED.app_id,
+  event_name = EXCLUDED.event_name,
+  endpoint_url = EXCLUDED.endpoint_url,
+  secret = EXCLUDED.secret,
+  is_active = EXCLUDED.is_active,
+  updated_at = NOW()
+RETURNING id, tenant_id, region_id, COALESCE(app_id,''), event_name, endpoint_url, COALESCE(secret,''), is_active, updated_at
+`, in.ID, in.TenantID, in.RegionID, in.AppID, in.EventName, in.EndpointURL, in.Secret, in.IsActive)
+	return scanSubscription(row)
+}
+
+func (r *Repository) List(ctx context.Context, tenantID, regionID string, onlyActive bool) ([]Subscription, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT id, tenant_id, region_id, COALESCE(app_id,''), event_name, endpoint_url, COALESCE(secret,''), is_active, updated_at
+FROM webhook_subscriptions
+WHERE tenant_id = $1 AND region_id = $2 AND ($3::bool = FALSE OR is_active = TRUE)
+ORDER BY created_at DESC
+`, tenantID, regionID, onlyActive)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+	out := make([]Subscription, 0)
+	for rows.Next() {
+		var item Subscription
+		var updatedAt time.Time
+		if err := rows.Scan(&item.ID, &item.TenantID, &item.RegionID, &item.AppID, &item.EventName, &item.EndpointURL, &item.Secret, &item.IsActive, &updatedAt); err != nil {
+			return nil, err
+		}
+		item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+type scanner interface{ Scan(dest ...any) error }
+
+func scanSubscription(row scanner) (Subscription, error) {
+	var out Subscription
+	var updatedAt time.Time
+	if err := row.Scan(&out.ID, &out.TenantID, &out.RegionID, &out.AppID, &out.EventName, &out.EndpointURL, &out.Secret, &out.IsActive, &updatedAt); err != nil {
+		return Subscription{}, err
+	}
+	out.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+	return out, nil
+}

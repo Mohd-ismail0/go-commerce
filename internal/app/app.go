@@ -25,6 +25,7 @@ import (
 	"rewrite/internal/modules/regions"
 	"rewrite/internal/modules/search"
 	"rewrite/internal/modules/shipping"
+	"rewrite/internal/modules/webhooks"
 	"rewrite/internal/server"
 	"rewrite/internal/shared/db"
 	"rewrite/internal/shared/events"
@@ -56,9 +57,9 @@ func New(ctx context.Context) (*App, error) {
 
 	outbox := events.NewOutboxStore(conn)
 	bus := events.NewBusWithOutbox(outbox)
-	webhooks := events.NewWebhookDispatcher(time.Duration(cfg.WebhookTimeoutMS) * time.Millisecond)
-	webhooks.Attach(bus)
-	events.NewWorker(outbox, webhooks).Start(appCtx)
+	webhookDispatcher := events.NewWebhookDispatcher(time.Duration(cfg.WebhookTimeoutMS) * time.Millisecond)
+	webhookDispatcher.Attach(bus)
+	events.NewWorker(outbox, webhookDispatcher).Start(appCtx)
 	promotionsSvc := promotions.NewService(promotions.NewRepository(conn))
 	pricingSvc := pricing.NewService(pricing.NewRepository(conn), promotionsSvc)
 	paymentSvc := payments.NewService(payments.NewRepository(conn))
@@ -84,6 +85,7 @@ func New(ctx context.Context) (*App, error) {
 				{Prefix: "/shipping", PermissionCode: "shipping.manage"},
 				{Prefix: "/identity/users", PermissionCode: "identity.users.manage"},
 				{Prefix: "/metadata", PermissionCode: "metadata.manage"},
+				{Prefix: "/apps/webhook-subscriptions", PermissionCode: "webhook.manage"},
 			}, middleware.PolicyOptions{
 				UserJWTSecret:         cfg.AuthJWTSecret,
 				UserJWTKeys:           jwtKeys,
@@ -104,6 +106,7 @@ func New(ctx context.Context) (*App, error) {
 		brands.NewHandler(brands.NewService(brands.NewRepository(conn))),
 		payments.NewHandler(paymentSvc, cfg.WebhookPaymentSecret, cfg.AppEnv),
 		shipping.NewHandler(shipping.NewService(shipping.NewRepository(conn))),
+		webhooks.NewHandler(webhooks.NewService(webhooks.NewRepository(conn))),
 		identity.NewHandler(identity.NewService(identity.NewRepository(conn), cfg.AuthJWTSecret, cfg.AuthJWTKeyset, cfg.AuthJWTTTLMinutes, cfg.AuthRefreshTTLMinutes)),
 		localization.NewHandler(localization.NewService(localization.NewRepository(conn))),
 		metadata.NewHandler(metadata.NewService(metadata.NewRepository(conn))),

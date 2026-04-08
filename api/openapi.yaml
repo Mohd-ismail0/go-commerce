@@ -375,6 +375,31 @@ components:
       required: [order_id]
       properties:
         order_id: { type: string }
+    WebhookSubscription:
+      type: object
+      required: [id, tenant_id, region_id, event_name, endpoint_url, is_active]
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        region_id: { type: string }
+        app_id: { type: string }
+        event_name: { type: string }
+        endpoint_url: { type: string }
+        secret: { type: string }
+        is_active: { type: boolean }
+        updated_at:
+          type: string
+          format: date-time
+    WebhookSubscriptionInput:
+      type: object
+      required: [event_name, endpoint_url]
+      properties:
+        id: { type: string }
+        app_id: { type: string }
+        event_name: { type: string }
+        endpoint_url: { type: string }
+        secret: { type: string }
+        is_active: { type: boolean }
     Customer:
       type: object
       properties:
@@ -764,6 +789,123 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Optimistic concurrency conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /apps/webhook-subscriptions:
+    get:
+      operationId: get_apps_webhook_subscriptions
+      summary: List webhook subscriptions for tenant/region
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: query
+          name: active
+          schema:
+            type: boolean
+      security:
+        - UserHeaderAuth: []
+      responses:
+        "200":
+          description: Webhook subscriptions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ItemsResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/WebhookSubscription"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: post_apps_webhook_subscriptions
+      summary: Create webhook subscription
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      security:
+        - UserHeaderAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookSubscriptionInput"
+      responses:
+        "201":
+          description: Webhook subscription saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookSubscription"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: patch_apps_webhook_subscriptions
+      summary: Update webhook subscription
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      security:
+        - UserHeaderAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookSubscriptionInput"
+      responses:
+        "201":
+          description: Webhook subscription saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookSubscription"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
           content:
             application/json:
               schema:
