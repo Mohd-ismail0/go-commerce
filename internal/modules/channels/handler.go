@@ -23,6 +23,11 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Get("/", h.list)
 		r.Post("/", h.save)
 		r.Patch("/", h.save)
+		r.Route("/{channelID}/product-listings", func(r chi.Router) {
+			r.Get("/", h.listProductListings)
+			r.Post("/", h.saveProductListing)
+			r.Patch("/", h.patchProductListing)
+		})
 	})
 }
 
@@ -69,4 +74,61 @@ func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	utils.JSON(w, http.StatusCreated, saved)
+}
+
+func (h *Handler) listProductListings(w http.ResponseWriter, r *http.Request) {
+	tenantID := middleware.TenantIDFromContext(r.Context())
+	regionID := middleware.RegionIDFromContext(r.Context())
+	channelID := strings.TrimSpace(chi.URLParam(r, "channelID"))
+	items, err := h.svc.ListProductListings(r.Context(), tenantID, regionID, channelID)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *Handler) saveProductListing(w http.ResponseWriter, r *http.Request) {
+	h.writeProductListing(w, r, false)
+}
+
+func (h *Handler) patchProductListing(w http.ResponseWriter, r *http.Request) {
+	h.writeProductListing(w, r, true)
+}
+
+func (h *Handler) writeProductListing(w http.ResponseWriter, r *http.Request, patch bool) {
+	var req struct {
+		ID                string  `json:"id"`
+		ProductID         string  `json:"product_id"`
+		PublishedAt       *string `json:"published_at"`
+		IsPublished       *bool   `json:"is_published"`
+		VisibleInListings *bool   `json:"visible_in_listings"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
+		return
+	}
+	channelID := strings.TrimSpace(chi.URLParam(r, "channelID"))
+	saved, err := h.svc.UpsertProductListing(r.Context(),
+		middleware.TenantIDFromContext(r.Context()),
+		middleware.RegionIDFromContext(r.Context()),
+		channelID,
+		ProductListingInput{
+			ID:                req.ID,
+			ProductID:         req.ProductID,
+			PublishedAt:       req.PublishedAt,
+			IsPublished:       req.IsPublished,
+			VisibleInListings: req.VisibleInListings,
+		},
+		patch,
+	)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	status := http.StatusCreated
+	if patch {
+		status = http.StatusOK
+	}
+	utils.JSON(w, status, saved)
 }

@@ -77,3 +77,109 @@ ORDER BY updated_at DESC
 	}
 	return out, rows.Err()
 }
+
+func (r *Repository) ChannelExists(ctx context.Context, tenantID, regionID, channelID string) (bool, error) {
+	var ok bool
+	err := r.db.QueryRowContext(ctx, `
+SELECT EXISTS(
+  SELECT 1 FROM channels
+  WHERE tenant_id = $1 AND region_id = $2 AND id = $3
+)
+`, tenantID, regionID, channelID).Scan(&ok)
+	return ok, err
+}
+
+func (r *Repository) ProductExists(ctx context.Context, tenantID, regionID, productID string) (bool, error) {
+	var ok bool
+	err := r.db.QueryRowContext(ctx, `
+SELECT EXISTS(
+  SELECT 1 FROM products
+  WHERE tenant_id = $1 AND region_id = $2 AND id = $3
+)
+`, tenantID, regionID, productID).Scan(&ok)
+	return ok, err
+}
+
+func (r *Repository) GetProductListingByKeys(ctx context.Context, tenantID, regionID, channelID, productID string) (ProductChannelListing, bool, error) {
+	var row ProductChannelListing
+	var updatedAt time.Time
+	var publishedAt sql.NullTime
+	err := r.db.QueryRowContext(ctx, `
+SELECT id, tenant_id, region_id, product_id, channel_id, is_published, visible_in_listings, published_at, updated_at
+FROM product_channel_listings
+WHERE tenant_id = $1 AND region_id = $2 AND channel_id = $3 AND product_id = $4
+`, tenantID, regionID, channelID, productID).Scan(
+		&row.ID, &row.TenantID, &row.RegionID, &row.ProductID, &row.ChannelID,
+		&row.IsPublished, &row.VisibleInListings, &publishedAt, &updatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return ProductChannelListing{}, false, nil
+	}
+	if err != nil {
+		return ProductChannelListing{}, false, err
+	}
+	row.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+	if publishedAt.Valid {
+		row.PublishedAt = publishedAt.Time.UTC().Format(time.RFC3339Nano)
+	}
+	return row, true, nil
+}
+
+func (r *Repository) ListProductListingsByChannel(ctx context.Context, tenantID, regionID, channelID string) ([]ProductChannelListing, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT id, tenant_id, region_id, product_id, channel_id, is_published, visible_in_listings, published_at, updated_at
+FROM product_channel_listings
+WHERE tenant_id = $1 AND region_id = $2 AND channel_id = $3
+ORDER BY updated_at DESC
+`, tenantID, regionID, channelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ProductChannelListing
+	for rows.Next() {
+		var row ProductChannelListing
+		var updatedAt time.Time
+		var publishedAt sql.NullTime
+		if err := rows.Scan(
+			&row.ID, &row.TenantID, &row.RegionID, &row.ProductID, &row.ChannelID,
+			&row.IsPublished, &row.VisibleInListings, &publishedAt, &updatedAt,
+		); err != nil {
+			return nil, err
+		}
+		row.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+		if publishedAt.Valid {
+			row.PublishedAt = publishedAt.Time.UTC().Format(time.RFC3339Nano)
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) SaveProductListing(ctx context.Context, row ProductChannelListing, publishedAt sql.NullTime) (ProductChannelListing, error) {
+	var out ProductChannelListing
+	var updatedAt time.Time
+	var publishedOut sql.NullTime
+	err := r.db.QueryRowContext(ctx, `
+INSERT INTO product_channel_listings (
+  id, tenant_id, region_id, product_id, channel_id, is_published, visible_in_listings, published_at, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+ON CONFLICT (tenant_id, region_id, product_id, channel_id) DO UPDATE SET
+  is_published = EXCLUDED.is_published,
+  visible_in_listings = EXCLUDED.visible_in_listings,
+  published_at = EXCLUDED.published_at,
+  updated_at = NOW()
+RETURNING id, tenant_id, region_id, product_id, channel_id, is_published, visible_in_listings, published_at, updated_at
+`, row.ID, row.TenantID, row.RegionID, row.ProductID, row.ChannelID, row.IsPublished, row.VisibleInListings, publishedAt).Scan(
+		&out.ID, &out.TenantID, &out.RegionID, &out.ProductID, &out.ChannelID,
+		&out.IsPublished, &out.VisibleInListings, &publishedOut, &updatedAt,
+	)
+	if err != nil {
+		return ProductChannelListing{}, err
+	}
+	out.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+	if publishedOut.Valid {
+		out.PublishedAt = publishedOut.Time.UTC().Format(time.RFC3339Nano)
+	}
+	return out, nil
+}

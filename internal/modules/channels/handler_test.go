@@ -3,6 +3,7 @@ package channels
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,6 +20,13 @@ type stubChannelRepo struct {
 	takenErr error
 	saveRet  Channel
 	saveErr  error
+
+	channelExists       bool
+	productExists       bool
+	listingByChannelRet []ProductChannelListing
+	getListing          ProductChannelListing
+	getListingOK        bool
+	saveListingRet      ProductChannelListing
 }
 
 func (s *stubChannelRepo) SlugTaken(_ context.Context, _, _, _, _ string) (bool, error) {
@@ -46,6 +54,29 @@ func (s *stubChannelRepo) List(_ context.Context, tenantID, regionID string) ([]
 		}
 	}
 	return out, nil
+}
+
+func (s *stubChannelRepo) ChannelExists(_ context.Context, _, _, _ string) (bool, error) {
+	return s.channelExists, nil
+}
+
+func (s *stubChannelRepo) ProductExists(_ context.Context, _, _, _ string) (bool, error) {
+	return s.productExists, nil
+}
+
+func (s *stubChannelRepo) GetProductListingByKeys(_ context.Context, _, _, _, _ string) (ProductChannelListing, bool, error) {
+	return s.getListing, s.getListingOK, nil
+}
+
+func (s *stubChannelRepo) ListProductListingsByChannel(_ context.Context, _, _, _ string) ([]ProductChannelListing, error) {
+	return s.listingByChannelRet, nil
+}
+
+func (s *stubChannelRepo) SaveProductListing(_ context.Context, row ProductChannelListing, _ sql.NullTime) (ProductChannelListing, error) {
+	if s.saveListingRet.ID != "" {
+		return s.saveListingRet, nil
+	}
+	return row, nil
 }
 
 func TestChannelsListTenantRegionScoped(t *testing.T) {
@@ -92,5 +123,47 @@ func TestChannelsCreateReturnsConflictOnDuplicateSlug(t *testing.T) {
 
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestProductListingsListRequiresExistingChannel(t *testing.T) {
+	repo := &stubChannelRepo{channelExists: false}
+	h := NewHandler(NewService(repo))
+	rt := chi.NewRouter()
+	rt.Use(middleware.TenantRegion("public", "global"))
+	h.RegisterRoutes(rt)
+
+	req := httptest.NewRequest(http.MethodGet, "/channels/c1/product-listings", nil)
+	req.Header.Set("X-Tenant-ID", "t1")
+	req.Header.Set("X-Region-ID", "r1")
+	rr := httptest.NewRecorder()
+	rt.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestProductListingsPatchNotFoundWhenMissing(t *testing.T) {
+	repo := &stubChannelRepo{
+		channelExists: true,
+		productExists: true,
+		getListingOK:  false,
+	}
+	h := NewHandler(NewService(repo))
+	rt := chi.NewRouter()
+	rt.Use(middleware.TenantRegion("public", "global"))
+	h.RegisterRoutes(rt)
+
+	req := httptest.NewRequest(http.MethodPatch, "/channels/c1/product-listings", bytes.NewBufferString(
+		`{"product_id":"p1","is_published":true}`,
+	))
+	req.Header.Set("X-Tenant-ID", "t1")
+	req.Header.Set("X-Region-ID", "r1")
+	rr := httptest.NewRecorder()
+	rt.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }

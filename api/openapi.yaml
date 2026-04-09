@@ -480,6 +480,47 @@ components:
           type: string
           pattern: "^[A-Z]{2}$"
         is_active: { type: boolean }
+    ProductChannelListing:
+      type: object
+      required:
+        [id, tenant_id, region_id, product_id, channel_id, is_published, visible_in_listings]
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        region_id: { type: string }
+        product_id: { type: string }
+        channel_id: { type: string }
+        is_published: { type: boolean }
+        visible_in_listings: { type: boolean }
+        published_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ProductChannelListingInput:
+      type: object
+      required: [product_id]
+      properties:
+        id: { type: string }
+        product_id: { type: string }
+        is_published: { type: boolean }
+        visible_in_listings: { type: boolean }
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+    ProductChannelListingPatchInput:
+      type: object
+      required: [product_id]
+      properties:
+        product_id: { type: string }
+        is_published: { type: boolean }
+        visible_in_listings: { type: boolean }
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
     Customer:
       type: object
       properties:
@@ -1770,6 +1811,161 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Slug conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /channels/{channel_id}/product-listings:
+    get:
+      operationId: get_channels_channel_id_product_listings
+      summary: List product listings for a channel
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: channel_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Product channel listings
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ItemsResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/ProductChannelListing"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Channel not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: post_channels_channel_id_product_listings
+      summary: Create or replace product channel listing (upsert by product and channel)
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: channel_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductChannelListingInput"
+      responses:
+        "201":
+          description: Listing saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductChannelListing"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Channel or product not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: patch_channels_channel_id_product_listings
+      summary: Partially update an existing product channel listing
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: channel_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductChannelListingPatchInput"
+      responses:
+        "200":
+          description: Listing updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductChannelListing"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Channel, product, or listing not found
           content:
             application/json:
               schema:
