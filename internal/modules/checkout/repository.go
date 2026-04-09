@@ -28,6 +28,9 @@ type Repository interface {
 	GetProductChannelListing(ctx context.Context, tenantID, regionID, channelID, productID string) (bool, bool, error)
 	GetVariantChannelListing(ctx context.Context, tenantID, regionID, channelID, variantID string) (int64, string, bool, bool, error)
 	GetVariantProductID(ctx context.Context, tenantID, regionID, variantID string) (string, bool, error)
+	ResolveShippingMethodPrice(ctx context.Context, tenantID, regionID, shippingMethodID, countryCode, channelID, postalCode, currency string, subtotalCents int64) (int64, bool, error)
+	UpdateShippingCents(ctx context.Context, tenantID, regionID, checkoutID string, shippingCents int64) (Session, error)
+	HasAuthorizedPaymentCoverage(ctx context.Context, tenantID, regionID, checkoutID string, requiredTotalCents int64) (bool, error)
 	Recalculate(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error)
 	UpdatePricing(ctx context.Context, tenantID, regionID, checkoutID string, taxCents, totalCents int64) (Session, error)
 	Complete(ctx context.Context, tenantID, regionID, checkoutID, orderID string) (OrderCreatedPayload, error)
@@ -43,10 +46,10 @@ func NewRepository(conn *sql.DB) Repository {
 
 func (r *PostgresRepository) CreateSession(ctx context.Context, in Session) (Session, error) {
 	row := r.db.QueryRowContext(ctx, `
-INSERT INTO checkout_sessions (id, tenant_id, region_id, customer_id, channel_id, status, currency, voucher_code, promotion_id, tax_class_id, country_code, subtotal_cents, shipping_cents, tax_cents, total_cents, created_at, updated_at)
-VALUES ($1,$2,$3,$4,NULLIF($5,''),$6,$7,NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),NULLIF($11,''),0,0,0,0,NOW(),NOW())
-RETURNING id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
-`, in.ID, in.TenantID, in.RegionID, in.CustomerID, in.ChannelID, in.Status, in.Currency, in.VoucherCode, in.PromotionID, in.TaxClassID, in.CountryCode)
+INSERT INTO checkout_sessions (id, tenant_id, region_id, customer_id, channel_id, shipping_method_id, shipping_address_country, shipping_address_postal_code, billing_address_country, billing_address_postal_code, status, currency, voucher_code, promotion_id, tax_class_id, country_code, subtotal_cents, shipping_cents, tax_cents, total_cents, created_at, updated_at)
+VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),$11,$12,NULLIF($13,''),NULLIF($14,''),NULLIF($15,''),NULLIF($16,''),0,0,0,0,NOW(),NOW())
+RETURNING id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+`, in.ID, in.TenantID, in.RegionID, in.CustomerID, in.ChannelID, in.ShippingMethodID, in.ShippingAddressCountry, in.ShippingAddressPostalCode, in.BillingAddressCountry, in.BillingAddressPostalCode, in.Status, in.Currency, in.VoucherCode, in.PromotionID, in.TaxClassID, in.CountryCode)
 	return scanSession(row)
 }
 
@@ -85,9 +88,14 @@ SET voucher_code = NULLIF($4,''),
     tax_class_id = NULLIF($6,''),
     country_code = NULLIF($7,''),
     channel_id = NULLIF($8,''),
+    shipping_method_id = NULLIF($9,''),
+    shipping_address_country = NULLIF($10,''),
+    shipping_address_postal_code = NULLIF($11,''),
+    billing_address_country = NULLIF($12,''),
+    billing_address_postal_code = NULLIF($13,''),
     updated_at = NOW()
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3
-`, checkoutID, tenantID, regionID, in.VoucherCode, in.PromotionID, in.TaxClassID, in.CountryCode, in.ChannelID)
+`, checkoutID, tenantID, regionID, in.VoucherCode, in.PromotionID, in.TaxClassID, in.CountryCode, in.ChannelID, in.ShippingMethodID, in.ShippingAddressCountry, in.ShippingAddressPostalCode, in.BillingAddressCountry, in.BillingAddressPostalCode)
 	if err != nil {
 		return Session{}, err
 	}
@@ -111,6 +119,78 @@ WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 		return Session{}, err
 	}
 	return r.getSession(ctx, tenantID, regionID, checkoutID)
+}
+
+func (r *PostgresRepository) ResolveShippingMethodPrice(ctx context.Context, tenantID, regionID, shippingMethodID, countryCode, channelID, postalCode, currency string, subtotalCents int64) (int64, bool, error) {
+	var price int64
+	err := r.db.QueryRowContext(ctx, `
+SELECT m.price_cents
+FROM shipping_methods m
+JOIN shipping_zones z ON z.id = m.shipping_zone_id AND z.tenant_id = m.tenant_id AND z.region_id = m.region_id
+WHERE m.tenant_id = $1
+  AND m.region_id = $2
+  AND m.id = $3
+  AND UPPER(m.currency) = UPPER($4)
+  AND (
+    jsonb_array_length(COALESCE(m.channel_ids, '[]'::jsonb)) = 0
+    OR COALESCE(m.channel_ids, '[]'::jsonb) @> to_jsonb(ARRAY[$5]::text[])
+  )
+  AND (
+    jsonb_array_length(COALESCE(m.postal_prefixes, '[]'::jsonb)) = 0
+    OR EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements_text(COALESCE(m.postal_prefixes, '[]'::jsonb)) pref(value)
+      WHERE UPPER($6) LIKE UPPER(pref.value) || '%'
+    )
+  )
+  AND ($7 >= COALESCE(m.min_order_cents, 0))
+  AND ($7 <= COALESCE(m.max_order_cents, 9223372036854775807))
+  AND EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements_text(COALESCE(z.countries, '[]'::jsonb)) country(value)
+    WHERE UPPER(country.value) = UPPER($8)
+  )
+`, tenantID, regionID, shippingMethodID, currency, channelID, postalCode, subtotalCents, countryCode).Scan(&price)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return price, true, nil
+}
+
+func (r *PostgresRepository) UpdateShippingCents(ctx context.Context, tenantID, regionID, checkoutID string, shippingCents int64) (Session, error) {
+	res, err := r.db.ExecContext(ctx, `
+UPDATE checkout_sessions
+SET shipping_cents = $4,
+    total_cents = subtotal_cents + $4,
+    updated_at = NOW()
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+`, checkoutID, tenantID, regionID, shippingCents)
+	if err != nil {
+		return Session{}, err
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return Session{}, ErrSessionNotFound
+	}
+	return r.getSession(ctx, tenantID, regionID, checkoutID)
+}
+
+func (r *PostgresRepository) HasAuthorizedPaymentCoverage(ctx context.Context, tenantID, regionID, checkoutID string, requiredTotalCents int64) (bool, error) {
+	var covered int64
+	err := r.db.QueryRowContext(ctx, `
+SELECT COALESCE(SUM(amount_cents), 0)
+FROM payments
+WHERE tenant_id = $1
+  AND region_id = $2
+  AND checkout_id = $3
+  AND status IN ('authorized', 'partially_captured', 'captured')
+`, tenantID, regionID, checkoutID).Scan(&covered)
+	if err != nil {
+		return false, err
+	}
+	return covered >= requiredTotalCents && requiredTotalCents > 0, nil
 }
 
 func (r *PostgresRepository) UpdatePricing(ctx context.Context, tenantID, regionID, checkoutID string, taxCents, totalCents int64) (Session, error) {
@@ -230,7 +310,7 @@ func (r *PostgresRepository) Complete(ctx context.Context, tenantID, regionID, c
 
 	var session Session
 	row := tx.QueryRowContext(ctx, `
-SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
 FROM checkout_sessions
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 FOR UPDATE
@@ -490,7 +570,7 @@ SELECT 1 FROM checkout_sessions WHERE id = $1 AND tenant_id = $2 AND region_id =
 
 func (r *PostgresRepository) getSession(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error) {
 	row := r.db.QueryRowContext(ctx, `
-SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
 FROM checkout_sessions
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 `, checkoutID, tenantID, regionID)
@@ -519,6 +599,11 @@ func scanSessionInto(row scanner, out *Session) error {
 		&out.RegionID,
 		&out.CustomerID,
 		&out.ChannelID,
+		&out.ShippingMethodID,
+		&out.ShippingAddressCountry,
+		&out.ShippingAddressPostalCode,
+		&out.BillingAddressCountry,
+		&out.BillingAddressPostalCode,
 		&out.Status,
 		&out.Currency,
 		&out.VoucherCode,

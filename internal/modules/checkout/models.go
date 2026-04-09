@@ -1,22 +1,27 @@
 package checkout
 
 type Session struct {
-	ID            string `json:"id"`
-	TenantID      string `json:"tenant_id"`
-	RegionID      string `json:"region_id"`
-	CustomerID    string `json:"customer_id"`
-	ChannelID     string `json:"channel_id,omitempty"`
-	Status        string `json:"status"`
-	Currency      string `json:"currency"`
-	VoucherCode   string `json:"voucher_code,omitempty"`
-	PromotionID   string `json:"promotion_id,omitempty"`
-	TaxClassID    string `json:"tax_class_id,omitempty"`
-	CountryCode   string `json:"country_code,omitempty"`
-	SubtotalCents int64  `json:"subtotal_cents"`
-	ShippingCents int64  `json:"shipping_cents"`
-	TaxCents      int64  `json:"tax_cents"`
-	TotalCents    int64  `json:"total_cents"`
-	UpdatedAt     string `json:"updated_at,omitempty"`
+	ID                        string `json:"id"`
+	TenantID                  string `json:"tenant_id"`
+	RegionID                  string `json:"region_id"`
+	CustomerID                string `json:"customer_id"`
+	ChannelID                 string `json:"channel_id,omitempty"`
+	ShippingMethodID          string `json:"shipping_method_id,omitempty"`
+	ShippingAddressCountry    string `json:"shipping_address_country,omitempty"`
+	ShippingAddressPostalCode string `json:"shipping_address_postal_code,omitempty"`
+	BillingAddressCountry     string `json:"billing_address_country,omitempty"`
+	BillingAddressPostalCode  string `json:"billing_address_postal_code,omitempty"`
+	Status                    string `json:"status"`
+	Currency                  string `json:"currency"`
+	VoucherCode               string `json:"voucher_code,omitempty"`
+	PromotionID               string `json:"promotion_id,omitempty"`
+	TaxClassID                string `json:"tax_class_id,omitempty"`
+	CountryCode               string `json:"country_code,omitempty"`
+	SubtotalCents             int64  `json:"subtotal_cents"`
+	ShippingCents             int64  `json:"shipping_cents"`
+	TaxCents                  int64  `json:"tax_cents"`
+	TotalCents                int64  `json:"total_cents"`
+	UpdatedAt                 string `json:"updated_at,omitempty"`
 }
 
 type Line struct {

@@ -11,10 +11,11 @@ import (
 )
 
 type fakeRepo struct {
-	completed   bool
-	session     Session
-	completeErr error
-	lines       []Line
+	completed      bool
+	session        Session
+	completeErr    error
+	lines          []Line
+	paymentCovered bool
 }
 
 func (f *fakeRepo) CreateSession(_ context.Context, in Session) (Session, error) {
@@ -94,11 +95,53 @@ func (f *fakeRepo) UpdateSessionContext(_ context.Context, _, _, checkoutID stri
 }
 
 func (f *fakeRepo) Recalculate(_ context.Context, _, _, checkoutID string) (Session, error) {
-	return Session{ID: checkoutID, Currency: "USD", SubtotalCents: 1000, ShippingCents: 200, TotalCents: 1200}, nil
+	if f.session.ID == "" {
+		f.session = Session{ID: checkoutID, Status: "open", Currency: "USD", SubtotalCents: 1000, ShippingCents: 200, TotalCents: 1200}
+	}
+	if f.session.Status == "" {
+		f.session.Status = "open"
+	}
+	if f.session.Currency == "" {
+		f.session.Currency = "USD"
+	}
+	if f.session.SubtotalCents == 0 {
+		f.session.SubtotalCents = 1000
+	}
+	return f.session, nil
 }
 
 func (f *fakeRepo) UpdatePricing(_ context.Context, _, _, checkoutID string, taxCents, totalCents int64) (Session, error) {
-	return Session{ID: checkoutID, Currency: "USD", SubtotalCents: 1000, ShippingCents: 200, TaxCents: taxCents, TotalCents: totalCents}, nil
+	shippingCents := f.session.ShippingCents
+	if shippingCents == 0 {
+		shippingCents = 200
+	}
+	return Session{ID: checkoutID, Status: "open", Currency: "USD", SubtotalCents: 1000, ShippingCents: shippingCents, TaxCents: taxCents, TotalCents: totalCents}, nil
+}
+
+func (f *fakeRepo) ResolveShippingMethodPrice(_ context.Context, _, _, shippingMethodID, countryCode, channelID, postalCode, currency string, subtotalCents int64) (int64, bool, error) {
+	if shippingMethodID == "" {
+		return 0, false, nil
+	}
+	if shippingMethodID == "ship_std" && countryCode == "US" && currency == "USD" {
+		return 250, true, nil
+	}
+	return 0, false, nil
+}
+
+func (f *fakeRepo) UpdateShippingCents(_ context.Context, _, _, checkoutID string, shippingCents int64) (Session, error) {
+	f.session.ShippingCents = shippingCents
+	f.session.ID = checkoutID
+	if f.session.Status == "" {
+		f.session.Status = "open"
+	}
+	if f.session.Currency == "" {
+		f.session.Currency = "USD"
+	}
+	return f.session, nil
+}
+
+func (f *fakeRepo) HasAuthorizedPaymentCoverage(_ context.Context, _, _, _ string, _ int64) (bool, error) {
+	return f.paymentCovered, nil
 }
 
 func (f *fakeRepo) Complete(_ context.Context, tenantID, regionID, checkoutID, orderID string) (OrderCreatedPayload, error) {
@@ -119,7 +162,7 @@ func (f *fakeRepo) Complete(_ context.Context, tenantID, regionID, checkoutID, o
 }
 
 func TestCompleteMapsChannelListingMismatchToConflict(t *testing.T) {
-	repo := &fakeRepo{completeErr: ErrChannelListingMismatch}
+	repo := &fakeRepo{completeErr: ErrChannelListingMismatch, paymentCovered: true}
 	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
 	_, err := svc.Complete(context.Background(), "tenant_a", "us", "chk_1")
 	if err == nil {
@@ -143,7 +186,7 @@ func (f *fakeCalculator) Calculate(_ context.Context, in pricing.CalculationInpu
 }
 
 func TestCompletePublishesOrderCreatedAndReturnsOrderID(t *testing.T) {
-	repo := &fakeRepo{}
+	repo := &fakeRepo{paymentCovered: true}
 	bus := events.NewBus()
 	done := make(chan struct{}, 1)
 	bus.Subscribe(events.EventOrderCreated, func(_ context.Context, payload any) {
@@ -171,6 +214,39 @@ func TestCompletePublishesOrderCreatedAndReturnsOrderID(t *testing.T) {
 	case <-done:
 	case <-time.After(500 * time.Millisecond):
 		t.Fatalf("expected order.created event to be published")
+	}
+}
+
+func TestCompleteRequiresAuthorizedPaymentCoverage(t *testing.T) {
+	repo := &fakeRepo{paymentCovered: false}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	_, err := svc.Complete(context.Background(), "tenant_a", "us", "chk_1")
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	apiErr, ok := err.(sharederrors.APIError)
+	if !ok || apiErr.Status != 409 {
+		t.Fatalf("expected 409 API error, got %#v", err)
+	}
+}
+
+func TestRecalculateAppliesEligibleShippingMethod(t *testing.T) {
+	repo := &fakeRepo{
+		session: Session{
+			ID:                     "chk_1",
+			Status:                 "open",
+			Currency:               "USD",
+			ShippingMethodID:       "ship_std",
+			ShippingAddressCountry: "US",
+		},
+	}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	updated, err := svc.Recalculate(context.Background(), "tenant_a", "us", "chk_1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if updated.ShippingCents != 250 {
+		t.Fatalf("expected shipping cents to be 250, got %d", updated.ShippingCents)
 	}
 }
 

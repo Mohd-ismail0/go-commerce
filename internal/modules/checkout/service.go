@@ -30,6 +30,11 @@ func (s *Service) CreateSession(ctx context.Context, in Session) (Session, error
 		return Session{}, sharederrors.BadRequest("invalid checkout payload")
 	}
 	in.Currency = strings.ToUpper(strings.TrimSpace(in.Currency))
+	in.ShippingMethodID = strings.TrimSpace(in.ShippingMethodID)
+	in.ShippingAddressCountry = strings.ToUpper(strings.TrimSpace(in.ShippingAddressCountry))
+	in.ShippingAddressPostalCode = strings.TrimSpace(in.ShippingAddressPostalCode)
+	in.BillingAddressCountry = strings.ToUpper(strings.TrimSpace(in.BillingAddressCountry))
+	in.BillingAddressPostalCode = strings.TrimSpace(in.BillingAddressPostalCode)
 	if strings.TrimSpace(in.ChannelID) != "" {
 		active, err := s.repo.ChannelIsActive(ctx, in.TenantID, in.RegionID, strings.TrimSpace(in.ChannelID))
 		if err != nil {
@@ -132,6 +137,11 @@ func (s *Service) UpdateSessionContext(ctx context.Context, tenantID, regionID, 
 		return Session{}, sharederrors.Conflict("checkout session is not open")
 	}
 	targetChannelID := strings.TrimSpace(in.ChannelID)
+	in.ShippingMethodID = strings.TrimSpace(in.ShippingMethodID)
+	in.ShippingAddressCountry = strings.ToUpper(strings.TrimSpace(in.ShippingAddressCountry))
+	in.ShippingAddressPostalCode = strings.TrimSpace(in.ShippingAddressPostalCode)
+	in.BillingAddressCountry = strings.ToUpper(strings.TrimSpace(in.BillingAddressCountry))
+	in.BillingAddressPostalCode = strings.TrimSpace(in.BillingAddressPostalCode)
 	channelIsChanging := targetChannelID != strings.TrimSpace(current.ChannelID)
 	if targetChannelID != "" {
 		active, err := s.repo.ChannelIsActive(ctx, tenantID, regionID, targetChannelID)
@@ -198,6 +208,37 @@ func (s *Service) Recalculate(ctx context.Context, tenantID, regionID, checkoutI
 	if s.calculator == nil {
 		return session, nil
 	}
+	if strings.TrimSpace(session.ShippingMethodID) != "" {
+		if strings.TrimSpace(session.ShippingAddressCountry) == "" {
+			return Session{}, sharederrors.Conflict("shipping_address_country is required when shipping_method_id is set")
+		}
+		shippingPrice, ok, shippingErr := s.repo.ResolveShippingMethodPrice(
+			ctx,
+			tenantID,
+			regionID,
+			session.ShippingMethodID,
+			session.ShippingAddressCountry,
+			session.ChannelID,
+			session.ShippingAddressPostalCode,
+			session.Currency,
+			session.SubtotalCents,
+		)
+		if shippingErr != nil {
+			return Session{}, sharederrors.Internal("failed to validate shipping method")
+		}
+		if !ok {
+			return Session{}, sharederrors.Conflict("selected shipping method is not eligible for checkout context")
+		}
+		session, err = s.repo.UpdateShippingCents(ctx, tenantID, regionID, checkoutID, shippingPrice)
+		if err != nil {
+			return Session{}, sharederrors.Internal("failed to apply shipping method")
+		}
+	} else if session.ShippingCents != 0 {
+		session, err = s.repo.UpdateShippingCents(ctx, tenantID, regionID, checkoutID, 0)
+		if err != nil {
+			return Session{}, sharederrors.Internal("failed to clear shipping cost")
+		}
+	}
 	calculated := s.calculator.Calculate(ctx, pricing.CalculationInput{
 		TenantID:        tenantID,
 		RegionID:        regionID,
@@ -216,8 +257,16 @@ func (s *Service) Recalculate(ctx context.Context, tenantID, regionID, checkoutI
 }
 
 func (s *Service) Complete(ctx context.Context, tenantID, regionID, checkoutID string) (CompleteResult, error) {
-	if _, err := s.Recalculate(ctx, tenantID, regionID, checkoutID); err != nil {
+	recalculated, err := s.Recalculate(ctx, tenantID, regionID, checkoutID)
+	if err != nil {
 		return CompleteResult{}, err
+	}
+	covered, err := s.repo.HasAuthorizedPaymentCoverage(ctx, tenantID, regionID, checkoutID, recalculated.TotalCents)
+	if err != nil {
+		return CompleteResult{}, sharederrors.Internal("failed to validate payment coverage")
+	}
+	if !covered {
+		return CompleteResult{}, sharederrors.Conflict("authorized payment coverage is required before checkout completion")
 	}
 	orderID := utils.NewID("ord")
 	saved, err := s.repo.Complete(ctx, tenantID, regionID, checkoutID, orderID)

@@ -29,14 +29,19 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 
 func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ID          string `json:"id"`
-		CustomerID  string `json:"customer_id"`
-		ChannelID   string `json:"channel_id"`
-		Currency    string `json:"currency"`
-		VoucherCode string `json:"voucher_code"`
-		PromotionID string `json:"promotion_id"`
-		TaxClassID  string `json:"tax_class_id"`
-		CountryCode string `json:"country_code"`
+		ID                        string `json:"id"`
+		CustomerID                string `json:"customer_id"`
+		ChannelID                 string `json:"channel_id"`
+		ShippingMethodID          string `json:"shipping_method_id"`
+		ShippingAddressCountry    string `json:"shipping_address_country"`
+		ShippingAddressPostalCode string `json:"shipping_address_postal_code"`
+		BillingAddressCountry     string `json:"billing_address_country"`
+		BillingAddressPostalCode  string `json:"billing_address_postal_code"`
+		Currency                  string `json:"currency"`
+		VoucherCode               string `json:"voucher_code"`
+		PromotionID               string `json:"promotion_id"`
+		TaxClassID                string `json:"tax_class_id"`
+		CountryCode               string `json:"country_code"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
@@ -47,16 +52,21 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		id = utils.NewID("chk")
 	}
 	saved, err := h.svc.CreateSession(r.Context(), Session{
-		ID:          id,
-		TenantID:    middleware.TenantIDFromContext(r.Context()),
-		RegionID:    middleware.RegionIDFromContext(r.Context()),
-		CustomerID:  req.CustomerID,
-		ChannelID:   req.ChannelID,
-		Currency:    req.Currency,
-		VoucherCode: req.VoucherCode,
-		PromotionID: req.PromotionID,
-		TaxClassID:  req.TaxClassID,
-		CountryCode: req.CountryCode,
+		ID:                        id,
+		TenantID:                  middleware.TenantIDFromContext(r.Context()),
+		RegionID:                  middleware.RegionIDFromContext(r.Context()),
+		CustomerID:                req.CustomerID,
+		ChannelID:                 req.ChannelID,
+		ShippingMethodID:          req.ShippingMethodID,
+		ShippingAddressCountry:    req.ShippingAddressCountry,
+		ShippingAddressPostalCode: req.ShippingAddressPostalCode,
+		BillingAddressCountry:     req.BillingAddressCountry,
+		BillingAddressPostalCode:  req.BillingAddressPostalCode,
+		Currency:                  req.Currency,
+		VoucherCode:               req.VoucherCode,
+		PromotionID:               req.PromotionID,
+		TaxClassID:                req.TaxClassID,
+		CountryCode:               req.CountryCode,
 	})
 	if err != nil {
 		utils.WriteError(w, err)
@@ -87,11 +97,16 @@ func (h *Handler) upsertLine(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) updateSessionContext(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		VoucherCode string `json:"voucher_code"`
-		PromotionID string `json:"promotion_id"`
-		TaxClassID  string `json:"tax_class_id"`
-		CountryCode string `json:"country_code"`
-		ChannelID   string `json:"channel_id"`
+		VoucherCode               string `json:"voucher_code"`
+		PromotionID               string `json:"promotion_id"`
+		TaxClassID                string `json:"tax_class_id"`
+		CountryCode               string `json:"country_code"`
+		ChannelID                 string `json:"channel_id"`
+		ShippingMethodID          string `json:"shipping_method_id"`
+		ShippingAddressCountry    string `json:"shipping_address_country"`
+		ShippingAddressPostalCode string `json:"shipping_address_postal_code"`
+		BillingAddressCountry     string `json:"billing_address_country"`
+		BillingAddressPostalCode  string `json:"billing_address_postal_code"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
@@ -103,11 +118,16 @@ func (h *Handler) updateSessionContext(w http.ResponseWriter, r *http.Request) {
 		middleware.RegionIDFromContext(r.Context()),
 		chi.URLParam(r, "checkout_id"),
 		Session{
-			VoucherCode: req.VoucherCode,
-			PromotionID: req.PromotionID,
-			TaxClassID:  req.TaxClassID,
-			CountryCode: req.CountryCode,
-			ChannelID:   req.ChannelID,
+			VoucherCode:               req.VoucherCode,
+			PromotionID:               req.PromotionID,
+			TaxClassID:                req.TaxClassID,
+			CountryCode:               req.CountryCode,
+			ChannelID:                 req.ChannelID,
+			ShippingMethodID:          req.ShippingMethodID,
+			ShippingAddressCountry:    req.ShippingAddressCountry,
+			ShippingAddressPostalCode: req.ShippingAddressPostalCode,
+			BillingAddressCountry:     req.BillingAddressCountry,
+			BillingAddressPostalCode:  req.BillingAddressPostalCode,
 		},
 	)
 	if err != nil {

@@ -337,6 +337,15 @@ components:
         region_id: { type: string }
         customer_id: { type: string }
         channel_id: { type: string }
+        shipping_method_id: { type: string }
+        shipping_address_country:
+          type: string
+          pattern: "^[A-Z]{2}$"
+        shipping_address_postal_code: { type: string }
+        billing_address_country:
+          type: string
+          pattern: "^[A-Z]{2}$"
+        billing_address_postal_code: { type: string }
         status: { type: string }
         currency:
           type: string
@@ -359,6 +368,15 @@ components:
         id: { type: string }
         customer_id: { type: string }
         channel_id: { type: string }
+        shipping_method_id: { type: string }
+        shipping_address_country:
+          type: string
+          pattern: "^[A-Z]{2}$"
+        shipping_address_postal_code: { type: string }
+        billing_address_country:
+          type: string
+          pattern: "^[A-Z]{2}$"
+        billing_address_postal_code: { type: string }
         currency:
           type: string
           pattern: "^[A-Z]{3}$"
@@ -373,6 +391,16 @@ components:
         promotion_id: { type: string }
         tax_class_id: { type: string }
         country_code: { type: string }
+        channel_id: { type: string }
+        shipping_method_id: { type: string }
+        shipping_address_country:
+          type: string
+          pattern: "^[A-Z]{2}$"
+        shipping_address_postal_code: { type: string }
+        billing_address_country:
+          type: string
+          pattern: "^[A-Z]{2}$"
+        billing_address_postal_code: { type: string }
     CheckoutLine:
       type: object
       required: [id, checkout_id, quantity, unit_price_cents, currency]
@@ -952,7 +980,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Stock, voucher, or channel-listing conflict
+          description: Stock, voucher, channel-listing conflict, or missing authorized payment coverage
           content:
             application/json:
               schema:
