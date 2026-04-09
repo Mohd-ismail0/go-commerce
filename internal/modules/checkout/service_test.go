@@ -32,6 +32,20 @@ func (f *fakeRepo) GetSession(_ context.Context, _, _, checkoutID string) (Sessi
 	return f.session, nil
 }
 
+func (f *fakeRepo) ChannelIsActive(_ context.Context, _, _, channelID string) (bool, error) {
+	return channelID == "web" || channelID == "", nil
+}
+
+func (f *fakeRepo) GetProductChannelListing(_ context.Context, _, _, channelID, productID string) (bool, bool, error) {
+	if channelID == "web" && productID == "prd_ok" {
+		return true, true, nil
+	}
+	if channelID == "web" && productID == "prd_hidden" {
+		return false, true, nil
+	}
+	return false, false, nil
+}
+
 func (f *fakeRepo) GetVariantChannelListing(_ context.Context, _, _, channelID, variantID string) (int64, string, bool, bool, error) {
 	if channelID == "web" && variantID == "var_ok" {
 		return 1200, "USD", true, true, nil
@@ -154,6 +168,38 @@ func TestUpsertLineRejectsPriceMismatchWithChannelListing(t *testing.T) {
 		VariantID:      "var_ok",
 		Quantity:       1,
 		UnitPriceCents: 999,
+		Currency:       "USD",
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+}
+
+func TestCreateSessionRejectsInactiveChannel(t *testing.T) {
+	repo := &fakeRepo{}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	_, err := svc.CreateSession(context.Background(), Session{
+		ID:         "chk_1",
+		TenantID:   "tenant_a",
+		RegionID:   "us",
+		CustomerID: "cus_1",
+		ChannelID:  "inactive",
+		Currency:   "USD",
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+}
+
+func TestUpsertLineRejectsUnpublishedProductForSessionChannel(t *testing.T) {
+	repo := &fakeRepo{session: Session{ID: "chk_1", ChannelID: "web", Currency: "USD"}}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	_, err := svc.UpsertLine(context.Background(), "tenant_a", "us", Line{
+		ID:             "ln_1",
+		CheckoutID:     "chk_1",
+		ProductID:      "prd_hidden",
+		Quantity:       1,
+		UnitPriceCents: 1200,
 		Currency:       "USD",
 	})
 	if err == nil {

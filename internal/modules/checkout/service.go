@@ -29,6 +29,16 @@ func (s *Service) CreateSession(ctx context.Context, in Session) (Session, error
 	if strings.TrimSpace(in.CustomerID) == "" || len(strings.TrimSpace(in.Currency)) != 3 {
 		return Session{}, sharederrors.BadRequest("invalid checkout payload")
 	}
+	in.Currency = strings.ToUpper(strings.TrimSpace(in.Currency))
+	if strings.TrimSpace(in.ChannelID) != "" {
+		active, err := s.repo.ChannelIsActive(ctx, in.TenantID, in.RegionID, strings.TrimSpace(in.ChannelID))
+		if err != nil {
+			return Session{}, sharederrors.Internal("failed to validate checkout channel")
+		}
+		if !active {
+			return Session{}, sharederrors.BadRequest("channel_id must reference an active channel")
+		}
+	}
 	if in.Status == "" {
 		in.Status = "open"
 	}
@@ -42,6 +52,7 @@ func (s *Service) UpsertLine(ctx context.Context, tenantID, regionID string, in 
 	if in.Quantity <= 0 || in.UnitPriceCents <= 0 || len(strings.TrimSpace(in.Currency)) != 3 {
 		return Line{}, sharederrors.BadRequest("invalid checkout line")
 	}
+	in.Currency = strings.ToUpper(strings.TrimSpace(in.Currency))
 	session, err := s.repo.GetSession(ctx, tenantID, regionID, in.CheckoutID)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
@@ -61,6 +72,15 @@ func (s *Service) UpsertLine(ctx context.Context, tenantID, regionID string, in 
 			return Line{}, sharederrors.BadRequest("checkout line price/currency must match channel variant listing")
 		}
 	}
+	if strings.TrimSpace(in.ProductID) != "" && strings.TrimSpace(in.VariantID) == "" && strings.TrimSpace(session.ChannelID) != "" {
+		isPublished, found, getErr := s.repo.GetProductChannelListing(ctx, tenantID, regionID, session.ChannelID, in.ProductID)
+		if getErr != nil {
+			return Line{}, sharederrors.Internal("failed to validate channel product listing")
+		}
+		if !found || !isPublished {
+			return Line{}, sharederrors.Conflict("product is not published in checkout channel")
+		}
+	}
 	line, err := s.repo.UpsertLine(ctx, tenantID, regionID, in)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
@@ -74,6 +94,15 @@ func (s *Service) UpsertLine(ctx context.Context, tenantID, regionID string, in 
 func (s *Service) UpdateSessionContext(ctx context.Context, tenantID, regionID, checkoutID string, in Session) (Session, error) {
 	if strings.TrimSpace(checkoutID) == "" {
 		return Session{}, sharederrors.BadRequest("checkout_id is required")
+	}
+	if strings.TrimSpace(in.ChannelID) != "" {
+		active, err := s.repo.ChannelIsActive(ctx, tenantID, regionID, strings.TrimSpace(in.ChannelID))
+		if err != nil {
+			return Session{}, sharederrors.Internal("failed to validate checkout channel")
+		}
+		if !active {
+			return Session{}, sharederrors.BadRequest("channel_id must reference an active channel")
+		}
 	}
 	updated, err := s.repo.UpdateSessionContext(ctx, tenantID, regionID, checkoutID, in)
 	if err != nil {

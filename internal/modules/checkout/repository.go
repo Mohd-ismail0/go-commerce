@@ -21,6 +21,8 @@ type Repository interface {
 	UpdateSessionContext(ctx context.Context, tenantID, regionID, checkoutID string, in Session) (Session, error)
 	UpsertLine(ctx context.Context, tenantID, regionID string, line Line) (Line, error)
 	GetSession(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error)
+	ChannelIsActive(ctx context.Context, tenantID, regionID, channelID string) (bool, error)
+	GetProductChannelListing(ctx context.Context, tenantID, regionID, channelID, productID string) (bool, bool, error)
 	GetVariantChannelListing(ctx context.Context, tenantID, regionID, channelID, variantID string) (int64, string, bool, bool, error)
 	Recalculate(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error)
 	UpdatePricing(ctx context.Context, tenantID, regionID, checkoutID string, taxCents, totalCents int64) (Session, error)
@@ -121,6 +123,38 @@ WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 
 func (r *PostgresRepository) GetSession(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error) {
 	return r.getSession(ctx, tenantID, regionID, checkoutID)
+}
+
+func (r *PostgresRepository) ChannelIsActive(ctx context.Context, tenantID, regionID, channelID string) (bool, error) {
+	var active bool
+	err := r.db.QueryRowContext(ctx, `
+SELECT is_active
+FROM channels
+WHERE tenant_id = $1 AND region_id = $2 AND id = $3
+`, tenantID, regionID, channelID).Scan(&active)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return active, nil
+}
+
+func (r *PostgresRepository) GetProductChannelListing(ctx context.Context, tenantID, regionID, channelID, productID string) (bool, bool, error) {
+	var isPublished bool
+	err := r.db.QueryRowContext(ctx, `
+SELECT is_published
+FROM product_channel_listings
+WHERE tenant_id = $1 AND region_id = $2 AND channel_id = $3 AND product_id = $4
+`, tenantID, regionID, channelID, productID).Scan(&isPublished)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	return isPublished, true, nil
 }
 
 func (r *PostgresRepository) GetVariantChannelListing(ctx context.Context, tenantID, regionID, channelID, variantID string) (int64, string, bool, bool, error) {
