@@ -5,6 +5,7 @@ type Session struct {
 	TenantID      string `json:"tenant_id"`
 	RegionID      string `json:"region_id"`
 	CustomerID    string `json:"customer_id"`
+	ChannelID     string `json:"channel_id,omitempty"`
 	Status        string `json:"status"`
 	Currency      string `json:"currency"`
 	VoucherCode   string `json:"voucher_code,omitempty"`

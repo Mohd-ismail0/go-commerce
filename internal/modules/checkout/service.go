@@ -42,6 +42,25 @@ func (s *Service) UpsertLine(ctx context.Context, tenantID, regionID string, in 
 	if in.Quantity <= 0 || in.UnitPriceCents <= 0 || len(strings.TrimSpace(in.Currency)) != 3 {
 		return Line{}, sharederrors.BadRequest("invalid checkout line")
 	}
+	session, err := s.repo.GetSession(ctx, tenantID, regionID, in.CheckoutID)
+	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			return Line{}, sharederrors.NotFound(err.Error())
+		}
+		return Line{}, sharederrors.Internal("failed to load checkout session")
+	}
+	if strings.TrimSpace(in.VariantID) != "" && strings.TrimSpace(session.ChannelID) != "" {
+		priceCents, currency, isPublished, found, getErr := s.repo.GetVariantChannelListing(ctx, tenantID, regionID, session.ChannelID, in.VariantID)
+		if getErr != nil {
+			return Line{}, sharederrors.Internal("failed to validate channel variant listing")
+		}
+		if !found || !isPublished {
+			return Line{}, sharederrors.Conflict("variant is not published in checkout channel")
+		}
+		if in.UnitPriceCents != priceCents || !strings.EqualFold(strings.TrimSpace(in.Currency), strings.TrimSpace(currency)) {
+			return Line{}, sharederrors.BadRequest("checkout line price/currency must match channel variant listing")
+		}
+	}
 	line, err := s.repo.UpsertLine(ctx, tenantID, regionID, in)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
