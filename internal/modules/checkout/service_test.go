@@ -14,6 +14,7 @@ type fakeRepo struct {
 	completed   bool
 	session     Session
 	completeErr error
+	lines       []Line
 }
 
 func (f *fakeRepo) CreateSession(_ context.Context, in Session) (Session, error) {
@@ -34,8 +35,21 @@ func (f *fakeRepo) GetSession(_ context.Context, _, _, checkoutID string) (Sessi
 	return f.session, nil
 }
 
+func (f *fakeRepo) ListLines(_ context.Context, _, _, checkoutID string) ([]Line, error) {
+	if len(f.lines) == 0 {
+		return nil, nil
+	}
+	out := make([]Line, 0, len(f.lines))
+	for _, l := range f.lines {
+		if l.CheckoutID == "" || l.CheckoutID == checkoutID {
+			out = append(out, l)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeRepo) ChannelIsActive(_ context.Context, _, _, channelID string) (bool, error) {
-	return channelID == "web" || channelID == "", nil
+	return channelID == "web" || channelID == "pos" || channelID == "", nil
 }
 
 func (f *fakeRepo) GetProductChannelListing(_ context.Context, _, _, channelID, productID string) (bool, bool, error) {
@@ -284,5 +298,40 @@ func TestUpsertLineAutoFillsProductFromVariant(t *testing.T) {
 	}
 	if line.ProductID != "prd_ok" {
 		t.Fatalf("expected product_id derived from variant, got %q", line.ProductID)
+	}
+}
+
+func TestUpdateSessionContextRejectsChannelSwitchWithIncompatibleLines(t *testing.T) {
+	repo := &fakeRepo{
+		session: Session{ID: "chk_1", ChannelID: "web", Currency: "USD"},
+		lines: []Line{
+			{ID: "ln_1", CheckoutID: "chk_1", VariantID: "var_ok", ProductID: "prd_ok", Quantity: 1, UnitPriceCents: 1200, Currency: "USD"},
+		},
+	}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	_, err := svc.UpdateSessionContext(context.Background(), "tenant_a", "us", "chk_1", Session{ChannelID: "pos"})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	apiErr, ok := err.(sharederrors.APIError)
+	if !ok || apiErr.Status != 409 {
+		t.Fatalf("expected 409 API error, got %#v", err)
+	}
+}
+
+func TestUpdateSessionContextAllowsCompatibleChannelSwitch(t *testing.T) {
+	repo := &fakeRepo{
+		session: Session{ID: "chk_1", ChannelID: "", Currency: "USD"},
+		lines: []Line{
+			{ID: "ln_1", CheckoutID: "chk_1", VariantID: "var_ok", ProductID: "prd_ok", Quantity: 1, UnitPriceCents: 1200, Currency: "USD"},
+		},
+	}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	updated, err := svc.UpdateSessionContext(context.Background(), "tenant_a", "us", "chk_1", Session{ChannelID: "web"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if updated.ID != "chk_1" {
+		t.Fatalf("expected checkout id chk_1, got %q", updated.ID)
 	}
 }

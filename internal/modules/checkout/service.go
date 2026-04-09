@@ -118,13 +118,54 @@ func (s *Service) UpdateSessionContext(ctx context.Context, tenantID, regionID, 
 	if strings.TrimSpace(checkoutID) == "" {
 		return Session{}, sharederrors.BadRequest("checkout_id is required")
 	}
-	if strings.TrimSpace(in.ChannelID) != "" {
-		active, err := s.repo.ChannelIsActive(ctx, tenantID, regionID, strings.TrimSpace(in.ChannelID))
+	current, err := s.repo.GetSession(ctx, tenantID, regionID, checkoutID)
+	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			return Session{}, sharederrors.NotFound(err.Error())
+		}
+		return Session{}, sharederrors.Internal("failed to load checkout session")
+	}
+	targetChannelID := strings.TrimSpace(in.ChannelID)
+	channelIsChanging := targetChannelID != strings.TrimSpace(current.ChannelID)
+	if targetChannelID != "" {
+		active, err := s.repo.ChannelIsActive(ctx, tenantID, regionID, targetChannelID)
 		if err != nil {
 			return Session{}, sharederrors.Internal("failed to validate checkout channel")
 		}
 		if !active {
 			return Session{}, sharederrors.BadRequest("channel_id must reference an active channel")
+		}
+	}
+	if channelIsChanging {
+		lines, err := s.repo.ListLines(ctx, tenantID, regionID, checkoutID)
+		if err != nil {
+			return Session{}, sharederrors.Internal("failed to validate existing checkout lines")
+		}
+		if len(lines) > 0 {
+			if targetChannelID == "" {
+				return Session{}, sharederrors.Conflict("cannot unset channel_id while checkout has lines")
+			}
+			for _, line := range lines {
+				if strings.TrimSpace(line.VariantID) != "" {
+					priceCents, currency, isPublished, found, getErr := s.repo.GetVariantChannelListing(ctx, tenantID, regionID, targetChannelID, line.VariantID)
+					if getErr != nil {
+						return Session{}, sharederrors.Internal("failed to validate channel variant listing")
+					}
+					if !found || !isPublished || line.UnitPriceCents != priceCents || !strings.EqualFold(strings.TrimSpace(line.Currency), strings.TrimSpace(currency)) {
+						return Session{}, sharederrors.Conflict("cannot change channel_id: existing variant lines are incompatible")
+					}
+					continue
+				}
+				if strings.TrimSpace(line.ProductID) != "" {
+					isPublished, found, getErr := s.repo.GetProductChannelListing(ctx, tenantID, regionID, targetChannelID, line.ProductID)
+					if getErr != nil {
+						return Session{}, sharederrors.Internal("failed to validate channel product listing")
+					}
+					if !found || !isPublished {
+						return Session{}, sharederrors.Conflict("cannot change channel_id: existing product lines are incompatible")
+					}
+				}
+			}
 		}
 	}
 	updated, err := s.repo.UpdateSessionContext(ctx, tenantID, regionID, checkoutID, in)

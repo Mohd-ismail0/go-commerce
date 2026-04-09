@@ -23,6 +23,7 @@ type Repository interface {
 	UpdateSessionContext(ctx context.Context, tenantID, regionID, checkoutID string, in Session) (Session, error)
 	UpsertLine(ctx context.Context, tenantID, regionID string, line Line) (Line, error)
 	GetSession(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error)
+	ListLines(ctx context.Context, tenantID, regionID, checkoutID string) ([]Line, error)
 	ChannelIsActive(ctx context.Context, tenantID, regionID, channelID string) (bool, error)
 	GetProductChannelListing(ctx context.Context, tenantID, regionID, channelID, productID string) (bool, bool, error)
 	GetVariantChannelListing(ctx context.Context, tenantID, regionID, channelID, variantID string) (int64, string, bool, bool, error)
@@ -126,6 +127,28 @@ WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 
 func (r *PostgresRepository) GetSession(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error) {
 	return r.getSession(ctx, tenantID, regionID, checkoutID)
+}
+
+func (r *PostgresRepository) ListLines(ctx context.Context, tenantID, regionID, checkoutID string) ([]Line, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT id, checkout_id, COALESCE(product_id,''), COALESCE(variant_id,''), quantity, unit_price_cents, currency
+FROM checkout_lines
+WHERE tenant_id = $1 AND region_id = $2 AND checkout_id = $3
+ORDER BY created_at ASC
+`, tenantID, regionID, checkoutID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Line{}
+	for rows.Next() {
+		var l Line
+		if err := rows.Scan(&l.ID, &l.CheckoutID, &l.ProductID, &l.VariantID, &l.Quantity, &l.UnitPriceCents, &l.Currency); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
 }
 
 func (r *PostgresRepository) ChannelIsActive(ctx context.Context, tenantID, regionID, channelID string) (bool, error) {
