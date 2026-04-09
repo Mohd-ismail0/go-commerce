@@ -63,7 +63,9 @@ ORDER BY updated_at DESC
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	var out []Channel
 	for rows.Next() {
 		var c Channel
@@ -146,7 +148,9 @@ ORDER BY updated_at DESC
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	var out []ProductChannelListing
 	for rows.Next() {
 		var row ProductChannelListing
@@ -230,7 +234,9 @@ ORDER BY updated_at DESC
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	var out []VariantChannelListing
 	for rows.Next() {
 		var row VariantChannelListing

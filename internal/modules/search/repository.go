@@ -35,7 +35,9 @@ LIMIT $5
 	if err != nil {
 		return []SearchHit{}
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := make([]SearchHit, 0, limit)
 	for rows.Next() {
 		var h SearchHit

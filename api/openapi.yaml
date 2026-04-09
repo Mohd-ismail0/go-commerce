@@ -366,7 +366,6 @@ components:
         promotion_id: { type: string }
         tax_class_id: { type: string }
         country_code: { type: string }
-        channel_id: { type: string }
     CheckoutSessionContextUpdateInput:
       type: object
       properties:

@@ -139,7 +139,9 @@ ORDER BY created_at ASC
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []Line{}
 	for rows.Next() {
 		var l Line

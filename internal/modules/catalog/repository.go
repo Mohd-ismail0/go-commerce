@@ -60,7 +60,9 @@ WHERE tenant_id = $1
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	for rows.Next() {
 		var entityID string
 		var fieldsRaw []byte
@@ -236,7 +238,9 @@ LIMIT $7
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []Product{}
 	for rows.Next() {
 		var row Product
@@ -353,7 +357,9 @@ ORDER BY v.id
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []ProductVariant{}
 	for rows.Next() {
 		var row ProductVariant

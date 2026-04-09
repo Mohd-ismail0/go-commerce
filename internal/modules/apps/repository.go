@@ -66,7 +66,9 @@ ORDER BY updated_at DESC
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []App{}
 	for rows.Next() {
 		var item App
