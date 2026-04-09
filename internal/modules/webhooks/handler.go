@@ -130,11 +130,20 @@ func (h *Handler) listDeliveries(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) retryOutbox(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
+		return
+	}
 	err := h.svc.RetryDeadOutbox(
 		r.Context(),
 		middleware.TenantIDFromContext(r.Context()),
 		middleware.RegionIDFromContext(r.Context()),
 		chi.URLParam(r, "outboxID"),
+		req.Reason,
+		middleware.UserIDFromContext(r.Context()),
 	)
 	if err != nil {
 		utils.WriteError(w, err)

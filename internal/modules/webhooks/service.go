@@ -14,7 +14,7 @@ type webhookRepo interface {
 	GetByID(ctx context.Context, tenantID, regionID, id string) (Subscription, bool, error)
 	AppExists(ctx context.Context, tenantID, regionID, appID string) (bool, error)
 	ListDeliveries(ctx context.Context, tenantID, regionID, status, eventName string, limit int) ([]Delivery, error)
-	RetryDeadOutbox(ctx context.Context, tenantID, regionID, outboxID string) (bool, error)
+	RetryDeadOutbox(ctx context.Context, tenantID, regionID, outboxID, reason, requestedBy string) (bool, error)
 }
 
 type Service struct {
@@ -120,8 +120,17 @@ func (s *Service) ListDeliveries(ctx context.Context, tenantID, regionID, status
 	return items, nil
 }
 
-func (s *Service) RetryDeadOutbox(ctx context.Context, tenantID, regionID, outboxID string) error {
-	ok, err := s.repo.RetryDeadOutbox(ctx, tenantID, regionID, strings.TrimSpace(outboxID))
+func (s *Service) RetryDeadOutbox(ctx context.Context, tenantID, regionID, outboxID, reason, requestedBy string) error {
+	outboxID = strings.TrimSpace(outboxID)
+	reason = strings.TrimSpace(reason)
+	requestedBy = strings.TrimSpace(requestedBy)
+	if outboxID == "" {
+		return sharederrors.BadRequest("outbox id is required")
+	}
+	if reason == "" {
+		return sharederrors.BadRequest("reason is required")
+	}
+	ok, err := s.repo.RetryDeadOutbox(ctx, tenantID, regionID, outboxID, reason, requestedBy)
 	if err != nil {
 		return sharederrors.Internal("failed to retry outbox event")
 	}

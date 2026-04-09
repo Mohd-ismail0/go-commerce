@@ -12,7 +12,7 @@ type stubRepo struct {
 	getByIDFn        func(ctx context.Context, tenantID, regionID, id string) (Subscription, bool, error)
 	appExists        func(ctx context.Context, tenantID, regionID, appID string) (bool, error)
 	listDeliveriesFn func(ctx context.Context, tenantID, regionID, status, eventName string, limit int) ([]Delivery, error)
-	retryDeadFn      func(ctx context.Context, tenantID, regionID, outboxID string) (bool, error)
+	retryDeadFn      func(ctx context.Context, tenantID, regionID, outboxID, reason, requestedBy string) (bool, error)
 }
 
 func (s *stubRepo) Save(ctx context.Context, in Subscription) (Subscription, error) {
@@ -50,9 +50,9 @@ func (s *stubRepo) ListDeliveries(ctx context.Context, tenantID, regionID, statu
 	return nil, nil
 }
 
-func (s *stubRepo) RetryDeadOutbox(ctx context.Context, tenantID, regionID, outboxID string) (bool, error) {
+func (s *stubRepo) RetryDeadOutbox(ctx context.Context, tenantID, regionID, outboxID, reason, requestedBy string) (bool, error) {
 	if s.retryDeadFn != nil {
-		return s.retryDeadFn(ctx, tenantID, regionID, outboxID)
+		return s.retryDeadFn(ctx, tenantID, regionID, outboxID, reason, requestedBy)
 	}
 	return false, nil
 }
@@ -139,9 +139,17 @@ func TestSaveMapsDuplicateConflict(t *testing.T) {
 
 func TestRetryDeadOutboxNotFound(t *testing.T) {
 	svc := NewService(&stubRepo{
-		retryDeadFn: func(context.Context, string, string, string) (bool, error) { return false, nil },
+		retryDeadFn: func(context.Context, string, string, string, string, string) (bool, error) { return false, nil },
 	})
-	err := svc.RetryDeadOutbox(context.Background(), "t1", "r1", "evt_missing")
+	err := svc.RetryDeadOutbox(context.Background(), "t1", "r1", "evt_missing", "manual replay", "u1")
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+}
+
+func TestRetryDeadOutboxRequiresReason(t *testing.T) {
+	svc := NewService(&stubRepo{})
+	err := svc.RetryDeadOutbox(context.Background(), "t1", "r1", "evt_1", "", "u1")
 	if err == nil {
 		t.Fatalf("expected error")
 	}

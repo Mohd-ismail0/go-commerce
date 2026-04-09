@@ -455,6 +455,14 @@ components:
         updated_at:
           type: string
           format: date-time
+    WebhookOutboxRetryInput:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          description: Human-readable reason for manual replay.
     App:
       type: object
       required: [id, tenant_id, region_id, name, is_active]
@@ -1287,6 +1295,12 @@ paths:
     post:
       operationId: post_webhooks_outbox_by_outbox_id_retry
       summary: Requeue dead outbox event for webhook retry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookOutboxRetryInput"
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
@@ -1313,6 +1327,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "403":
           description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "400":
+          description: Invalid request body
           content:
             application/json:
               schema:

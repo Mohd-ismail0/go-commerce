@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"time"
+
+	"rewrite/internal/shared/utils"
 )
 
 type Repository struct {
@@ -98,8 +100,13 @@ LIMIT $5
 	return out, rows.Err()
 }
 
-func (r *Repository) RetryDeadOutbox(ctx context.Context, tenantID, regionID, outboxID string) (bool, error) {
-	res, err := r.db.ExecContext(ctx, `
+func (r *Repository) RetryDeadOutbox(ctx context.Context, tenantID, regionID, outboxID, reason, requestedBy string) (bool, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `
 UPDATE event_outbox
 SET status = 'pending',
     available_at = NOW(),
@@ -114,7 +121,20 @@ WHERE id = $1
 		return false, err
 	}
 	rows, _ := res.RowsAffected()
-	return rows > 0, nil
+	if rows == 0 {
+		return false, nil
+	}
+	_, err = tx.ExecContext(ctx, `
+INSERT INTO webhook_replay_audit (id, tenant_id, region_id, outbox_id, reason, requested_by, created_at)
+VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NOW())
+`, utils.NewID("wra"), tenantID, regionID, outboxID, reason, requestedBy)
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (r *Repository) List(ctx context.Context, tenantID, regionID string, onlyActive bool) ([]Subscription, error) {
