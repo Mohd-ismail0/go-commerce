@@ -164,6 +164,9 @@ func (s *Service) Complete(ctx context.Context, tenantID, regionID, checkoutID s
 		if errors.Is(err, ErrVoucherUnavailable) {
 			return CompleteResult{}, sharederrors.Conflict(err.Error())
 		}
+		if errors.Is(err, ErrChannelListingMismatch) {
+			return CompleteResult{}, sharederrors.Conflict(err.Error())
+		}
 		return CompleteResult{}, sharederrors.Internal("failed to complete checkout")
 	}
 	s.bus.Publish(ctx, events.EventOrderCreated, saved)

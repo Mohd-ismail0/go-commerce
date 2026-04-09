@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"rewrite/internal/shared/utils"
@@ -15,6 +16,7 @@ var ErrSessionNotOpen = errors.New("checkout session is not open")
 var ErrCheckoutEmpty = errors.New("checkout has no lines")
 var ErrInsufficientStock = errors.New("insufficient stock for checkout line")
 var ErrVoucherUnavailable = errors.New("voucher is unavailable")
+var ErrChannelListingMismatch = errors.New("checkout line no longer matches channel listing")
 
 type Repository interface {
 	CreateSession(ctx context.Context, in Session) (Session, error)
@@ -226,6 +228,24 @@ WHERE checkout_id = $1 AND tenant_id = $2 AND region_id = $3
 	if err = lines.Err(); err != nil {
 		return OrderCreatedPayload{}, err
 	}
+	if strings.TrimSpace(session.ChannelID) != "" {
+		active, activeErr := channelIsActiveTx(ctx, tx, tenantID, regionID, session.ChannelID)
+		if activeErr != nil {
+			return OrderCreatedPayload{}, activeErr
+		}
+		if !active {
+			return OrderCreatedPayload{}, ErrChannelListingMismatch
+		}
+		for _, l := range collected {
+			ok, validateErr := lineMatchesChannelListingTx(ctx, tx, tenantID, regionID, session.ChannelID, l)
+			if validateErr != nil {
+				return OrderCreatedPayload{}, validateErr
+			}
+			if !ok {
+				return OrderCreatedPayload{}, ErrChannelListingMismatch
+			}
+		}
+	}
 
 	// Wave 1 invariant: reserve stock atomically during checkout completion.
 	requiredByStockItem := map[string]int64{}
@@ -361,6 +381,61 @@ LIMIT 1
 		}
 	}
 	return "", ErrInsufficientStock
+}
+
+func channelIsActiveTx(ctx context.Context, tx *sql.Tx, tenantID, regionID, channelID string) (bool, error) {
+	var active bool
+	err := tx.QueryRowContext(ctx, `
+SELECT is_active
+FROM channels
+WHERE tenant_id = $1 AND region_id = $2 AND id = $3
+`, tenantID, regionID, channelID).Scan(&active)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return active, nil
+}
+
+func lineMatchesChannelListingTx(ctx context.Context, tx *sql.Tx, tenantID, regionID, channelID string, line Line) (bool, error) {
+	if strings.TrimSpace(line.VariantID) != "" {
+		var priceCents int64
+		var currency string
+		var isPublished bool
+		err := tx.QueryRowContext(ctx, `
+SELECT price_cents, currency, is_published
+FROM variant_channel_listings
+WHERE tenant_id = $1 AND region_id = $2 AND channel_id = $3 AND variant_id = $4
+`, tenantID, regionID, channelID, line.VariantID).Scan(&priceCents, &currency, &isPublished)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if !isPublished {
+			return false, nil
+		}
+		return line.UnitPriceCents == priceCents && strings.EqualFold(strings.TrimSpace(line.Currency), strings.TrimSpace(currency)), nil
+	}
+	if strings.TrimSpace(line.ProductID) != "" {
+		var isPublished bool
+		err := tx.QueryRowContext(ctx, `
+SELECT is_published
+FROM product_channel_listings
+WHERE tenant_id = $1 AND region_id = $2 AND channel_id = $3 AND product_id = $4
+`, tenantID, regionID, channelID, line.ProductID).Scan(&isPublished)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return isPublished, nil
+	}
+	return true, nil
 }
 
 func (r *PostgresRepository) sessionExists(ctx context.Context, tenantID, regionID, checkoutID string) bool {

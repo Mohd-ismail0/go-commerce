@@ -6,12 +6,14 @@ import (
 	"time"
 
 	"rewrite/internal/modules/pricing"
+	sharederrors "rewrite/internal/shared/errors"
 	"rewrite/internal/shared/events"
 )
 
 type fakeRepo struct {
-	completed bool
-	session   Session
+	completed   bool
+	session     Session
+	completeErr error
 }
 
 func (f *fakeRepo) CreateSession(_ context.Context, in Session) (Session, error) {
@@ -73,6 +75,9 @@ func (f *fakeRepo) UpdatePricing(_ context.Context, _, _, checkoutID string, tax
 }
 
 func (f *fakeRepo) Complete(_ context.Context, tenantID, regionID, checkoutID, orderID string) (OrderCreatedPayload, error) {
+	if f.completeErr != nil {
+		return OrderCreatedPayload{}, f.completeErr
+	}
 	f.completed = true
 	return OrderCreatedPayload{
 		ID:         orderID,
@@ -84,6 +89,19 @@ func (f *fakeRepo) Complete(_ context.Context, tenantID, regionID, checkoutID, o
 		TotalCents: 1200,
 		Currency:   "USD",
 	}, nil
+}
+
+func TestCompleteMapsChannelListingMismatchToConflict(t *testing.T) {
+	repo := &fakeRepo{completeErr: ErrChannelListingMismatch}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	_, err := svc.Complete(context.Background(), "tenant_a", "us", "chk_1")
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	apiErr, ok := err.(sharederrors.APIError)
+	if !ok || apiErr.Status != 409 {
+		t.Fatalf("expected 409 API error, got %#v", err)
+	}
 }
 
 type fakeCalculator struct{}
