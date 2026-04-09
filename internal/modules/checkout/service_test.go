@@ -27,10 +27,13 @@ func (f *fakeRepo) UpsertLine(_ context.Context, _, _ string, line Line) (Line, 
 
 func (f *fakeRepo) GetSession(_ context.Context, _, _, checkoutID string) (Session, error) {
 	if f.session.ID == "" {
-		f.session = Session{ID: checkoutID, Currency: "USD"}
+		f.session = Session{ID: checkoutID, Status: "open", Currency: "USD"}
 	}
 	if f.session.ID == "" {
 		f.session.ID = checkoutID
+	}
+	if f.session.Status == "" {
+		f.session.Status = "open"
 	}
 	return f.session, nil
 }
@@ -301,6 +304,26 @@ func TestUpsertLineAutoFillsProductFromVariant(t *testing.T) {
 	}
 }
 
+func TestUpsertLineRejectsCompletedSession(t *testing.T) {
+	repo := &fakeRepo{session: Session{ID: "chk_1", Status: "completed", ChannelID: "web", Currency: "USD"}}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	_, err := svc.UpsertLine(context.Background(), "tenant_a", "us", Line{
+		ID:             "ln_1",
+		CheckoutID:     "chk_1",
+		VariantID:      "var_ok",
+		Quantity:       1,
+		UnitPriceCents: 1200,
+		Currency:       "USD",
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	apiErr, ok := err.(sharederrors.APIError)
+	if !ok || apiErr.Status != 409 {
+		t.Fatalf("expected 409 API error, got %#v", err)
+	}
+}
+
 func TestUpdateSessionContextRejectsChannelSwitchWithIncompatibleLines(t *testing.T) {
 	repo := &fakeRepo{
 		session: Session{ID: "chk_1", ChannelID: "web", Currency: "USD"},
@@ -333,5 +356,22 @@ func TestUpdateSessionContextAllowsCompatibleChannelSwitch(t *testing.T) {
 	}
 	if updated.ID != "chk_1" {
 		t.Fatalf("expected checkout id chk_1, got %q", updated.ID)
+	}
+}
+
+func TestUpdateSessionContextRejectsCompletedSession(t *testing.T) {
+	repo := &fakeRepo{
+		session: Session{ID: "chk_1", Status: "completed", ChannelID: "web", Currency: "USD"},
+	}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	_, err := svc.UpdateSessionContext(context.Background(), "tenant_a", "us", "chk_1", Session{
+		VoucherCode: "SAVE10",
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	apiErr, ok := err.(sharederrors.APIError)
+	if !ok || apiErr.Status != 409 {
+		t.Fatalf("expected 409 API error, got %#v", err)
 	}
 }

@@ -276,3 +276,26 @@ type WebhookEndpoint struct {
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
+
+type WebhookReplayAudit struct {
+	ID          string
+	TenantID    string
+	RegionID    string
+	OutboxID    string
+	Reason      string
+	RequestedBy sql.NullString
+	CreatedAt   time.Time
+}
+
+type WebhookSubscription struct {
+	ID          string
+	TenantID    string
+	RegionID    string
+	AppID       sql.NullString
+	EventName   string
+	EndpointUrl string
+	Secret      sql.NullString
+	IsActive    bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}

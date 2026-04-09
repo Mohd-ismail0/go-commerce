@@ -87,6 +87,7 @@ func New(ctx context.Context) (*App, error) {
 				{Prefix: "/shipping", PermissionCode: "shipping.manage"},
 				{Prefix: "/identity/users", PermissionCode: "identity.users.manage"},
 				{Prefix: "/metadata", PermissionCode: "metadata.manage"},
+				{Prefix: "/apps", PermissionCode: "app.manage"},
 				{Prefix: "/apps/webhook-subscriptions", PermissionCode: "webhook.manage"},
 				{Prefix: "/webhooks/deliveries", PermissionCode: "webhook.manage"},
 				{Prefix: "/webhooks/outbox", PermissionCode: "webhook.manage"},

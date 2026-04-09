@@ -65,6 +65,9 @@ func (s *Service) UpsertLine(ctx context.Context, tenantID, regionID string, in 
 		}
 		return Line{}, sharederrors.Internal("failed to load checkout session")
 	}
+	if !strings.EqualFold(strings.TrimSpace(session.Status), "open") {
+		return Line{}, sharederrors.Conflict("checkout session is not open")
+	}
 	if !strings.EqualFold(strings.TrimSpace(session.Currency), in.Currency) {
 		return Line{}, sharederrors.BadRequest("checkout line currency must match session currency")
 	}
@@ -124,6 +127,9 @@ func (s *Service) UpdateSessionContext(ctx context.Context, tenantID, regionID, 
 			return Session{}, sharederrors.NotFound(err.Error())
 		}
 		return Session{}, sharederrors.Internal("failed to load checkout session")
+	}
+	if !strings.EqualFold(strings.TrimSpace(current.Status), "open") {
+		return Session{}, sharederrors.Conflict("checkout session is not open")
 	}
 	targetChannelID := strings.TrimSpace(in.ChannelID)
 	channelIsChanging := targetChannelID != strings.TrimSpace(current.ChannelID)

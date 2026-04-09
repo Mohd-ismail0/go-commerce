@@ -80,7 +80,9 @@ LIMIT $5
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	out := []Delivery{}
 	for rows.Next() {
 		var item Delivery
@@ -105,7 +107,9 @@ func (r *Repository) RetryDeadOutbox(ctx context.Context, tenantID, regionID, ou
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 	res, err := tx.ExecContext(ctx, `
 UPDATE event_outbox
 SET status = 'pending',
