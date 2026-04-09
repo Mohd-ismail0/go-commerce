@@ -429,6 +429,16 @@ components:
         endpoint_url: { type: string }
         secret: { type: string }
         is_active: { type: boolean }
+    WebhookSubscriptionPatchInput:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string }
+        app_id: { type: string }
+        event_name: { type: string }
+        endpoint_url: { type: string }
+        secret: { type: string }
+        is_active: { type: boolean }
     App:
       type: object
       required: [id, tenant_id, region_id, name, is_active]
@@ -1095,10 +1105,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/WebhookSubscriptionInput"
+              $ref: "#/components/schemas/WebhookSubscriptionPatchInput"
       responses:
-        "201":
-          description: Webhook subscription saved
+        "200":
+          description: Webhook subscription updated
           content:
             application/json:
               schema:
@@ -1117,6 +1127,94 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "403":
           description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Webhook subscription not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Duplicate subscription
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /apps/webhook-subscriptions/{subscription_id}/activate:
+    post:
+      operationId: post_apps_webhook_subscriptions_by_subscription_id_activate
+      summary: Activate webhook subscription
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: subscription_id
+          required: true
+          schema: { type: string }
+      security:
+        - UserHeaderAuth: []
+      responses:
+        "200":
+          description: Webhook subscription activated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookSubscription"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Webhook subscription not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /apps/webhook-subscriptions/{subscription_id}/deactivate:
+    post:
+      operationId: post_apps_webhook_subscriptions_by_subscription_id_deactivate
+      summary: Deactivate webhook subscription
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: subscription_id
+          required: true
+          schema: { type: string }
+      security:
+        - UserHeaderAuth: []
+      responses:
+        "200":
+          description: Webhook subscription deactivated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookSubscription"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Webhook subscription not found
           content:
             application/json:
               schema:

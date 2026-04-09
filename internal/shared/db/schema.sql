@@ -282,6 +282,25 @@ CREATE TABLE IF NOT EXISTS webhook_endpoints (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS webhook_subscriptions (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  region_id TEXT NOT NULL,
+  app_id TEXT REFERENCES apps(id) ON DELETE CASCADE,
+  event_name TEXT NOT NULL,
+  endpoint_url TEXT NOT NULL,
+  secret TEXT,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_webhook_subscriptions_tenant_region_event_endpoint_app
+ON webhook_subscriptions (tenant_id, region_id, event_name, endpoint_url, COALESCE(app_id, ''));
+
+CREATE INDEX IF NOT EXISTS ix_webhook_subscriptions_active_lookup
+ON webhook_subscriptions (tenant_id, region_id, event_name, is_active);
+
 CREATE UNIQUE INDEX IF NOT EXISTS ux_products_tenant_region_sku
 ON products (tenant_id, region_id, sku);
 

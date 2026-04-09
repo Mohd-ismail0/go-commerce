@@ -3,6 +3,7 @@ package webhooks
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 )
 
@@ -30,6 +31,33 @@ ON CONFLICT (id) DO UPDATE SET
 RETURNING id, tenant_id, region_id, COALESCE(app_id,''), event_name, endpoint_url, COALESCE(secret,''), is_active, updated_at
 `, in.ID, in.TenantID, in.RegionID, in.AppID, in.EventName, in.EndpointURL, in.Secret, in.IsActive)
 	return scanSubscription(row)
+}
+
+func (r *Repository) GetByID(ctx context.Context, tenantID, regionID, id string) (Subscription, bool, error) {
+	row := r.db.QueryRowContext(ctx, `
+SELECT id, tenant_id, region_id, COALESCE(app_id,''), event_name, endpoint_url, COALESCE(secret,''), is_active, updated_at
+FROM webhook_subscriptions
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+`, id, tenantID, regionID)
+	item, err := scanSubscription(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Subscription{}, false, nil
+	}
+	if err != nil {
+		return Subscription{}, false, err
+	}
+	return item, true, nil
+}
+
+func (r *Repository) AppExists(ctx context.Context, tenantID, regionID, appID string) (bool, error) {
+	var found bool
+	err := r.db.QueryRowContext(ctx, `
+SELECT EXISTS(
+  SELECT 1 FROM apps
+  WHERE tenant_id = $1 AND region_id = $2 AND id = $3
+)
+`, tenantID, regionID, appID).Scan(&found)
+	return found, err
 }
 
 func (r *Repository) List(ctx context.Context, tenantID, regionID string, onlyActive bool) ([]Subscription, error) {

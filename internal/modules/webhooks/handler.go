@@ -21,8 +21,10 @@ func NewHandler(svc *Service) *Handler {
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Route("/apps/webhook-subscriptions", func(r chi.Router) {
 		r.Get("/", h.list)
-		r.Post("/", h.save)
-		r.Patch("/", h.save)
+		r.Post("/", h.create)
+		r.Patch("/", h.patch)
+		r.Post("/{subscriptionID}/activate", h.activate)
+		r.Post("/{subscriptionID}/deactivate", h.deactivate)
 	})
 }
 
@@ -41,7 +43,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	utils.JSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
-func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	var req Subscription
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
@@ -52,10 +54,53 @@ func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 	}
 	req.TenantID = middleware.TenantIDFromContext(r.Context())
 	req.RegionID = middleware.RegionIDFromContext(r.Context())
-	saved, err := h.svc.Save(r.Context(), req)
+	saved, err := h.svc.Save(r.Context(), req, false)
 	if err != nil {
 		utils.WriteError(w, err)
 		return
 	}
 	utils.JSON(w, http.StatusCreated, saved)
+}
+
+func (h *Handler) patch(w http.ResponseWriter, r *http.Request) {
+	var req Subscription
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
+		return
+	}
+	if strings.TrimSpace(req.ID) == "" {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "id is required for patch"})
+		return
+	}
+	req.TenantID = middleware.TenantIDFromContext(r.Context())
+	req.RegionID = middleware.RegionIDFromContext(r.Context())
+	saved, err := h.svc.Save(r.Context(), req, true)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, saved)
+}
+
+func (h *Handler) activate(w http.ResponseWriter, r *http.Request) {
+	h.setActive(w, r, true)
+}
+
+func (h *Handler) deactivate(w http.ResponseWriter, r *http.Request) {
+	h.setActive(w, r, false)
+}
+
+func (h *Handler) setActive(w http.ResponseWriter, r *http.Request, active bool) {
+	saved, err := h.svc.SetActive(
+		r.Context(),
+		middleware.TenantIDFromContext(r.Context()),
+		middleware.RegionIDFromContext(r.Context()),
+		chi.URLParam(r, "subscriptionID"),
+		active,
+	)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, saved)
 }
