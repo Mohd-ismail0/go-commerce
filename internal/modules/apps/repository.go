@@ -3,6 +3,7 @@ package apps
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 )
 
@@ -31,6 +32,26 @@ RETURNING id, tenant_id, region_id, name, is_active, COALESCE(auth_token,''), up
 		&out.ID, &out.TenantID, &out.RegionID, &out.Name, &out.IsActive, &out.AuthToken, &out.UpdatedAt,
 	)
 	return out, err
+}
+
+func (r *Repository) GetByID(ctx context.Context, tenantID, regionID, id string) (App, bool, error) {
+	var out App
+	var updatedAt time.Time
+	err := r.db.QueryRowContext(ctx, `
+SELECT id, tenant_id, region_id, name, is_active, COALESCE(auth_token,''), updated_at
+FROM apps
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+`, id, tenantID, regionID).Scan(
+		&out.ID, &out.TenantID, &out.RegionID, &out.Name, &out.IsActive, &out.AuthToken, &updatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return App{}, false, nil
+	}
+	if err != nil {
+		return App{}, false, err
+	}
+	out.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+	return out, true, nil
 }
 
 func (r *Repository) List(ctx context.Context, tenantID, regionID string, activeOnly bool) ([]App, error) {

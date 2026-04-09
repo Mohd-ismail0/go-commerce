@@ -451,6 +451,14 @@ components:
         name: { type: string }
         is_active: { type: boolean }
         auth_token: { type: string }
+    AppPatchInput:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        is_active: { type: boolean }
+        auth_token: { type: string }
     Channel:
       type: object
       required: [id, tenant_id, region_id, slug, name, default_currency, default_country, is_active]
@@ -1181,16 +1189,76 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AppInput"
+              $ref: "#/components/schemas/AppPatchInput"
       responses:
-        "201":
-          description: App saved
+        "200":
+          description: App updated
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/App"
         "400":
           description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: App not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Duplicate app name in tenant/region
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /apps/{app_id}/activate:
+    post:
+      operationId: post_apps_by_app_id_activate
+      summary: Activate app
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: app_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: App activated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/App"
+        "404":
+          description: App not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /apps/{app_id}/deactivate:
+    post:
+      operationId: post_apps_by_app_id_deactivate
+      summary: Deactivate app
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: app_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: App deactivated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/App"
+        "404":
+          description: App not found
           content:
             application/json:
               schema:
