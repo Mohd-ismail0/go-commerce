@@ -12,6 +12,17 @@ import (
 	"github.com/sqlc-dev/pqtype"
 )
 
+type App struct {
+	ID        string
+	TenantID  string
+	RegionID  string
+	Name      string
+	IsActive  bool
+	AuthToken sql.NullString
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 type Brand struct {
 	ID              string
 	TenantID        string
@@ -32,6 +43,19 @@ type Category struct {
 	ParentID  sql.NullString
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+type Channel struct {
+	ID              string
+	TenantID        string
+	RegionID        string
+	Slug            string
+	Name            string
+	DefaultCurrency string
+	DefaultCountry  string
+	IsActive        bool
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 type Collection struct {
@@ -148,6 +172,19 @@ type Product struct {
 	UpdatedAt         time.Time
 }
 
+type ProductChannelListing struct {
+	ID                string
+	TenantID          string
+	RegionID          string
+	ProductID         string
+	ChannelID         string
+	IsPublished       bool
+	VisibleInListings bool
+	PublishedAt       sql.NullTime
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
 type ProductMedium struct {
 	ID        string
 	TenantID  string
@@ -214,6 +251,20 @@ type Translation struct {
 	Fields       json.RawMessage
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+}
+
+type VariantChannelListing struct {
+	ID          string
+	TenantID    string
+	RegionID    string
+	VariantID   string
+	ChannelID   string
+	Currency    string
+	PriceCents  int64
+	IsPublished bool
+	PublishedAt sql.NullTime
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type WebhookEndpoint struct {
