@@ -2,9 +2,9 @@ package apps
 
 import (
 	"context"
-	"errors"
 	"strings"
 
+	shareddb "rewrite/internal/shared/db"
 	sharederrors "rewrite/internal/shared/errors"
 )
 
@@ -93,9 +93,5 @@ func (s *Service) SetActive(ctx context.Context, tenantID, regionID, appID strin
 }
 
 func isUniqueViolation(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return !errors.Is(err, context.DeadlineExceeded) && (strings.Contains(msg, "duplicate key") || strings.Contains(msg, "unique constraint") || strings.Contains(msg, "ux_apps_tenant_region_name_ci"))
+	return shareddb.IsUniqueConstraintViolation(err, "ux_apps_tenant_region_name_ci")
 }

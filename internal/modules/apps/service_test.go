@@ -2,8 +2,9 @@ package apps
 
 import (
 	"context"
-	"errors"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type stubRepo struct {
@@ -71,7 +72,7 @@ func TestPatchPreservesAuthTokenWhenOmitted(t *testing.T) {
 func TestCreateDuplicateNameMapsConflict(t *testing.T) {
 	repo := &stubRepo{
 		saveFn: func(_ context.Context, _ App) (App, error) {
-			return App{}, errors.New("duplicate key value violates unique constraint ux_apps_tenant_region_name_ci")
+			return App{}, &pgconn.PgError{Code: "23505", ConstraintName: "ux_apps_tenant_region_name_ci"}
 		},
 	}
 	svc := NewService(repo)

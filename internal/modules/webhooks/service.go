@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	shareddb "rewrite/internal/shared/db"
 	sharederrors "rewrite/internal/shared/errors"
 	"rewrite/internal/shared/events"
 )
@@ -93,10 +94,7 @@ func (s *Service) validateAndSave(ctx context.Context, in Subscription) (Subscri
 	}
 	saved, err := s.repo.Save(ctx, in)
 	if err != nil {
-		lower := strings.ToLower(err.Error())
-		if strings.Contains(lower, "ux_webhook_subscriptions_tenant_region_event_endpoint_app") ||
-			strings.Contains(lower, "duplicate key") ||
-			strings.Contains(lower, "unique constraint") {
+		if shareddb.IsUniqueConstraintViolation(err, "ux_webhook_subscriptions_tenant_region_event_endpoint_app") {
 			return Subscription{}, sharederrors.Conflict("duplicate webhook subscription for event and endpoint")
 		}
 		return Subscription{}, sharederrors.Internal("failed to save webhook subscription")

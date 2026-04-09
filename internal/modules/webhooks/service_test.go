@@ -2,8 +2,9 @@ package webhooks
 
 import (
 	"context"
-	"errors"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type stubRepo struct {
@@ -121,7 +122,7 @@ func TestPatchPreservesSecretWhenOmitted(t *testing.T) {
 func TestSaveMapsDuplicateConflict(t *testing.T) {
 	svc := NewService(&stubRepo{
 		saveFn: func(context.Context, Subscription) (Subscription, error) {
-			return Subscription{}, errors.New("duplicate key value violates unique constraint ux_webhook_subscriptions_tenant_region_event_endpoint_app")
+			return Subscription{}, &pgconn.PgError{Code: "23505", ConstraintName: "ux_webhook_subscriptions_tenant_region_event_endpoint_app"}
 		},
 	})
 	_, err := svc.Save(context.Background(), Subscription{
