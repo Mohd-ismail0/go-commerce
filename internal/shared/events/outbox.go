@@ -101,6 +101,32 @@ type DeliveryAttempt struct {
 	NextRetryAt    *time.Time
 }
 
+func (s *OutboxStore) ListDeliveredSubscriptionIDs(ctx context.Context, tenantID, regionID, outboxID string) (map[string]struct{}, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT subscription_id
+FROM webhook_deliveries
+WHERE tenant_id = $1
+  AND region_id = $2
+  AND outbox_id = $3
+  AND status = 'done'
+`, tenantID, regionID, outboxID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+	out := map[string]struct{}{}
+	for rows.Next() {
+		var subscriptionID string
+		if err := rows.Scan(&subscriptionID); err != nil {
+			return nil, err
+		}
+		out[subscriptionID] = struct{}{}
+	}
+	return out, rows.Err()
+}
+
 type WebhookSubscription struct {
 	ID          string
 	EventName   string

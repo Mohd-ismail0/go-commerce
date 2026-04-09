@@ -9,6 +9,7 @@ import (
 type fakeWorkerStore struct {
 	events     []OutboxEvent
 	subs       []WebhookSubscription
+	delivered  map[string]struct{}
 	recorded   []DeliveryAttempt
 	doneIDs    []string
 	failedIDs  []string
@@ -44,6 +45,17 @@ func (f *fakeWorkerStore) MarkFailed(ctx context.Context, id string) error {
 
 func (f *fakeWorkerStore) ListActiveWebhookSubscriptions(ctx context.Context, tenantID, regionID, eventName string) ([]WebhookSubscription, error) {
 	return f.subs, nil
+}
+
+func (f *fakeWorkerStore) ListDeliveredSubscriptionIDs(ctx context.Context, tenantID, regionID, outboxID string) (map[string]struct{}, error) {
+	if f.delivered == nil {
+		return map[string]struct{}{}, nil
+	}
+	out := make(map[string]struct{}, len(f.delivered))
+	for id := range f.delivered {
+		out[id] = struct{}{}
+	}
+	return out, nil
 }
 
 func (f *fakeWorkerStore) RecordDeliveryAttempt(ctx context.Context, item DeliveryAttempt) error {
@@ -111,5 +123,36 @@ func TestWorkerRetriesAndRecordsAttemptOnFailure(t *testing.T) {
 	}
 	if len(store.recorded) != 1 || store.recorded[0].Status != "failed" || store.recorded[0].NextRetryAt == nil {
 		t.Fatalf("expected one failed delivery record with retry time, got %#v", store.recorded)
+	}
+}
+
+func TestWorkerSkipsAlreadyDeliveredSubscriptionsOnRetry(t *testing.T) {
+	base := time.Date(2026, 4, 7, 10, 0, 0, 0, time.UTC)
+	store := &fakeWorkerStore{
+		events: []OutboxEvent{{ID: "evt3", TenantID: "t1", RegionID: "r1", EventName: EventOrderCreated, Payload: `{"x":1}`, Attempts: 1}},
+		subs: []WebhookSubscription{
+			{ID: "sub_done", EventName: EventOrderCreated, EndpointURL: "http://done.test"},
+			{ID: "sub_retry", EventName: EventOrderCreated, EndpointURL: "http://retry.test"},
+		},
+		delivered: map[string]struct{}{"sub_done": {}},
+	}
+	deliverer := &fakeDeliverer{
+		results: []WebhookDeliveryResult{{SubscriptionID: "sub_retry", StatusCode: 200, ResponseBody: "ok"}},
+	}
+	worker := &Worker{store: store, dispatcher: deliverer, now: func() time.Time { return base }, maxRetries: 8}
+
+	worker.tick(context.Background())
+
+	if len(store.recorded) != 1 {
+		t.Fatalf("expected one new delivery attempt, got %#v", store.recorded)
+	}
+	if store.recorded[0].SubscriptionID != "sub_retry" {
+		t.Fatalf("expected retry only for sub_retry, got %#v", store.recorded[0])
+	}
+	if len(store.doneIDs) != 1 || store.doneIDs[0] != "evt3" {
+		t.Fatalf("expected outbox to be marked done, got %#v", store.doneIDs)
+	}
+	if len(store.retryCalls) != 0 {
+		t.Fatalf("expected no retry scheduling, got %#v", store.retryCalls)
 	}
 }

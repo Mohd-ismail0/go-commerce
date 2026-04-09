@@ -12,6 +12,7 @@ type outboxWorkerStore interface {
 	MarkRetry(ctx context.Context, id string, attempts int64, nextRetryAt time.Time) error
 	MarkFailed(ctx context.Context, id string) error
 	ListActiveWebhookSubscriptions(ctx context.Context, tenantID, regionID, eventName string) ([]WebhookSubscription, error)
+	ListDeliveredSubscriptionIDs(ctx context.Context, tenantID, regionID, outboxID string) (map[string]struct{}, error)
 	RecordDeliveryAttempt(ctx context.Context, item DeliveryAttempt) error
 }
 
@@ -63,6 +64,11 @@ func (w *Worker) tick(ctx context.Context) {
 			_ = w.store.MarkRetry(ctx, item.ID, nextAttempts, nextRetryAt)
 			continue
 		}
+		deliveredIDs, deliveredErr := w.store.ListDeliveredSubscriptionIDs(ctx, item.TenantID, item.RegionID, item.ID)
+		if deliveredErr != nil {
+			_ = w.store.MarkRetry(ctx, item.ID, nextAttempts, nextRetryAt)
+			continue
+		}
 		if len(targetSubs) == 0 {
 			if err := w.store.MarkDone(ctx, item.ID); err != nil {
 				_ = w.store.MarkRetry(ctx, item.ID, nextAttempts, nextRetryAt)
@@ -71,11 +77,20 @@ func (w *Worker) tick(ctx context.Context) {
 		}
 		targets := make([]WebhookDeliveryInput, 0, len(targetSubs))
 		for _, sub := range targetSubs {
+			if _, alreadyDone := deliveredIDs[sub.ID]; alreadyDone {
+				continue
+			}
 			targets = append(targets, WebhookDeliveryInput{
 				SubscriptionID: sub.ID,
 				URL:            sub.EndpointURL,
 				Secret:         sub.Secret,
 			})
+		}
+		if len(targets) == 0 {
+			if err := w.store.MarkDone(ctx, item.ID); err != nil {
+				_ = w.store.MarkRetry(ctx, item.ID, nextAttempts, nextRetryAt)
+			}
+			continue
 		}
 		results := w.dispatcher.Deliver(ctx, item.EventName, map[string]any{"raw": item.Payload}, targets)
 		allSucceeded := true
