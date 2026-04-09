@@ -60,6 +60,63 @@ SELECT EXISTS(
 	return found, err
 }
 
+func (r *Repository) ListDeliveries(ctx context.Context, tenantID, regionID, status, eventName string, limit int) ([]Delivery, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := r.db.QueryContext(ctx, `
+SELECT d.outbox_id, d.subscription_id, d.status, COALESCE(d.response_status, 0), COALESCE(d.response_body, ''), d.attempts, d.next_retry_at, d.updated_at
+FROM webhook_deliveries d
+JOIN event_outbox o ON o.id = d.outbox_id AND o.tenant_id = d.tenant_id AND o.region_id = d.region_id
+WHERE d.tenant_id = $1
+  AND d.region_id = $2
+  AND ($3::text = '' OR d.status = $3)
+  AND ($4::text = '' OR o.event_name = $4)
+ORDER BY d.updated_at DESC
+LIMIT $5
+`, tenantID, regionID, status, eventName, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Delivery{}
+	for rows.Next() {
+		var item Delivery
+		var nextRetryAt sql.NullTime
+		var updatedAt time.Time
+		if err := rows.Scan(
+			&item.OutboxID, &item.SubscriptionID, &item.Status, &item.ResponseStatus, &item.ResponseBody, &item.Attempts, &nextRetryAt, &updatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if nextRetryAt.Valid {
+			item.NextRetryAt = nextRetryAt.Time.UTC().Format(time.RFC3339Nano)
+		}
+		item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) RetryDeadOutbox(ctx context.Context, tenantID, regionID, outboxID string) (bool, error) {
+	res, err := r.db.ExecContext(ctx, `
+UPDATE event_outbox
+SET status = 'pending',
+    available_at = NOW(),
+    attempts = 0,
+    updated_at = NOW()
+WHERE id = $1
+  AND tenant_id = $2
+  AND region_id = $3
+  AND status = 'dead'
+`, outboxID, tenantID, regionID)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := res.RowsAffected()
+	return rows > 0, nil
+}
+
 func (r *Repository) List(ctx context.Context, tenantID, regionID string, onlyActive bool) ([]Subscription, error) {
 	rows, err := r.db.QueryContext(ctx, `
 SELECT id, tenant_id, region_id, COALESCE(app_id,''), event_name, endpoint_url, COALESCE(secret,''), is_active, updated_at

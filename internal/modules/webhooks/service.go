@@ -13,6 +13,8 @@ type webhookRepo interface {
 	List(ctx context.Context, tenantID, regionID string, onlyActive bool) ([]Subscription, error)
 	GetByID(ctx context.Context, tenantID, regionID, id string) (Subscription, bool, error)
 	AppExists(ctx context.Context, tenantID, regionID, appID string) (bool, error)
+	ListDeliveries(ctx context.Context, tenantID, regionID, status, eventName string, limit int) ([]Delivery, error)
+	RetryDeadOutbox(ctx context.Context, tenantID, regionID, outboxID string) (bool, error)
 }
 
 type Service struct {
@@ -108,6 +110,25 @@ func (s *Service) List(ctx context.Context, tenantID, regionID string, onlyActiv
 		return nil, sharederrors.Internal("failed to list webhook subscriptions")
 	}
 	return items, nil
+}
+
+func (s *Service) ListDeliveries(ctx context.Context, tenantID, regionID, status, eventName string, limit int) ([]Delivery, error) {
+	items, err := s.repo.ListDeliveries(ctx, tenantID, regionID, strings.TrimSpace(status), strings.TrimSpace(eventName), limit)
+	if err != nil {
+		return nil, sharederrors.Internal("failed to list webhook deliveries")
+	}
+	return items, nil
+}
+
+func (s *Service) RetryDeadOutbox(ctx context.Context, tenantID, regionID, outboxID string) error {
+	ok, err := s.repo.RetryDeadOutbox(ctx, tenantID, regionID, strings.TrimSpace(outboxID))
+	if err != nil {
+		return sharederrors.Internal("failed to retry outbox event")
+	}
+	if !ok {
+		return sharederrors.NotFound("dead outbox event not found")
+	}
+	return nil
 }
 
 func isAllowedEvent(name string) bool {

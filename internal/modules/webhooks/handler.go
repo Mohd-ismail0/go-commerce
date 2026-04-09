@@ -3,6 +3,7 @@ package webhooks
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -25,6 +26,10 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Patch("/", h.patch)
 		r.Post("/{subscriptionID}/activate", h.activate)
 		r.Post("/{subscriptionID}/deactivate", h.deactivate)
+	})
+	r.Route("/webhooks", func(r chi.Router) {
+		r.Get("/deliveries", h.listDeliveries)
+		r.Post("/outbox/{outboxID}/retry", h.retryOutbox)
 	})
 }
 
@@ -103,4 +108,37 @@ func (h *Handler) setActive(w http.ResponseWriter, r *http.Request, active bool)
 		return
 	}
 	utils.JSON(w, http.StatusOK, saved)
+}
+
+func (h *Handler) listDeliveries(w http.ResponseWriter, r *http.Request) {
+	tenantID := middleware.TenantIDFromContext(r.Context())
+	regionID := middleware.RegionIDFromContext(r.Context())
+	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	eventName := strings.TrimSpace(r.URL.Query().Get("event_name"))
+	limit := 50
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	items, err := h.svc.ListDeliveries(r.Context(), tenantID, regionID, status, eventName, limit)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *Handler) retryOutbox(w http.ResponseWriter, r *http.Request) {
+	err := h.svc.RetryDeadOutbox(
+		r.Context(),
+		middleware.TenantIDFromContext(r.Context()),
+		middleware.RegionIDFromContext(r.Context()),
+		chi.URLParam(r, "outboxID"),
+	)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, map[string]any{"retried": true})
 }

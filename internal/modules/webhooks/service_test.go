@@ -7,10 +7,12 @@ import (
 )
 
 type stubRepo struct {
-	saveFn    func(ctx context.Context, in Subscription) (Subscription, error)
-	listFn    func(ctx context.Context, tenantID, regionID string, onlyActive bool) ([]Subscription, error)
-	getByIDFn func(ctx context.Context, tenantID, regionID, id string) (Subscription, bool, error)
-	appExists func(ctx context.Context, tenantID, regionID, appID string) (bool, error)
+	saveFn           func(ctx context.Context, in Subscription) (Subscription, error)
+	listFn           func(ctx context.Context, tenantID, regionID string, onlyActive bool) ([]Subscription, error)
+	getByIDFn        func(ctx context.Context, tenantID, regionID, id string) (Subscription, bool, error)
+	appExists        func(ctx context.Context, tenantID, regionID, appID string) (bool, error)
+	listDeliveriesFn func(ctx context.Context, tenantID, regionID, status, eventName string, limit int) ([]Delivery, error)
+	retryDeadFn      func(ctx context.Context, tenantID, regionID, outboxID string) (bool, error)
 }
 
 func (s *stubRepo) Save(ctx context.Context, in Subscription) (Subscription, error) {
@@ -39,6 +41,20 @@ func (s *stubRepo) AppExists(ctx context.Context, tenantID, regionID, appID stri
 		return s.appExists(ctx, tenantID, regionID, appID)
 	}
 	return true, nil
+}
+
+func (s *stubRepo) ListDeliveries(ctx context.Context, tenantID, regionID, status, eventName string, limit int) ([]Delivery, error) {
+	if s.listDeliveriesFn != nil {
+		return s.listDeliveriesFn(ctx, tenantID, regionID, status, eventName, limit)
+	}
+	return nil, nil
+}
+
+func (s *stubRepo) RetryDeadOutbox(ctx context.Context, tenantID, regionID, outboxID string) (bool, error) {
+	if s.retryDeadFn != nil {
+		return s.retryDeadFn(ctx, tenantID, regionID, outboxID)
+	}
+	return false, nil
 }
 
 func TestSaveRejectsUnsupportedEvent(t *testing.T) {
@@ -116,6 +132,16 @@ func TestSaveMapsDuplicateConflict(t *testing.T) {
 		EndpointURL: "https://example.test/hook",
 		IsActive:    true,
 	}, false)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+}
+
+func TestRetryDeadOutboxNotFound(t *testing.T) {
+	svc := NewService(&stubRepo{
+		retryDeadFn: func(context.Context, string, string, string) (bool, error) { return false, nil },
+	})
+	err := svc.RetryDeadOutbox(context.Background(), "t1", "r1", "evt_missing")
 	if err == nil {
 		t.Fatalf("expected error")
 	}

@@ -439,6 +439,22 @@ components:
         endpoint_url: { type: string }
         secret: { type: string }
         is_active: { type: boolean }
+    WebhookDelivery:
+      type: object
+      required: [outbox_id, subscription_id, status, attempts]
+      properties:
+        outbox_id: { type: string }
+        subscription_id: { type: string }
+        status: { type: string }
+        response_status: { type: integer }
+        response_body: { type: string }
+        attempts: { type: integer, format: int64 }
+        next_retry_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
     App:
       type: object
       required: [id, tenant_id, region_id, name, is_active]
@@ -1215,6 +1231,94 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Webhook subscription not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /webhooks/deliveries:
+    get:
+      operationId: get_webhooks_deliveries
+      summary: List webhook delivery attempts
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: query
+          name: status
+          schema: { type: string }
+        - in: query
+          name: event_name
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      security:
+        - UserHeaderAuth: []
+      responses:
+        "200":
+          description: Webhook deliveries
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ItemsResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/WebhookDelivery"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /webhooks/outbox/{outbox_id}/retry:
+    post:
+      operationId: post_webhooks_outbox_by_outbox_id_retry
+      summary: Requeue dead outbox event for webhook retry
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: outbox_id
+          required: true
+          schema: { type: string }
+      security:
+        - UserHeaderAuth: []
+      responses:
+        "200":
+          description: Outbox event requeued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  retried: { type: boolean }
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Dead outbox event not found
           content:
             application/json:
               schema:
