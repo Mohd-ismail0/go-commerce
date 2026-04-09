@@ -54,14 +54,25 @@ RETURNING id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALES
 }
 
 func (r *PostgresRepository) UpsertLine(ctx context.Context, tenantID, regionID string, line Line) (Line, error) {
-	if !r.sessionExists(ctx, tenantID, regionID, line.CheckoutID) {
+	status, found, statusErr := r.sessionStatus(ctx, tenantID, regionID, line.CheckoutID)
+	if statusErr != nil {
+		return Line{}, statusErr
+	}
+	if !found {
 		return Line{}, ErrSessionNotFound
+	}
+	if status != "open" {
+		return Line{}, ErrSessionNotOpen
 	}
 	if line.ID != "" {
 		row := r.db.QueryRowContext(ctx, `
 UPDATE checkout_lines
 SET product_id = NULLIF($6,''), variant_id = NULLIF($7,''), quantity = $4, unit_price_cents = $5, currency = $8, updated_at = NOW()
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND checkout_id = $9
+  AND EXISTS (
+    SELECT 1 FROM checkout_sessions s
+    WHERE s.id = $9 AND s.tenant_id = $2 AND s.region_id = $3 AND s.status = 'open'
+  )
 RETURNING id, checkout_id, COALESCE(product_id,''), COALESCE(variant_id,''), quantity, unit_price_cents, currency
 `, line.ID, tenantID, regionID, line.Quantity, line.UnitPriceCents, line.ProductID, line.VariantID, line.Currency, line.CheckoutID)
 		out, err := scanLine(row)
@@ -74,10 +85,27 @@ RETURNING id, checkout_id, COALESCE(product_id,''), COALESCE(variant_id,''), qua
 	}
 	row := r.db.QueryRowContext(ctx, `
 INSERT INTO checkout_lines (id, tenant_id, region_id, checkout_id, product_id, variant_id, quantity, unit_price_cents, currency, created_at, updated_at)
-VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),$7,$8,$9,NOW(),NOW())
+SELECT $1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),$7,$8,$9,NOW(),NOW()
+WHERE EXISTS (
+  SELECT 1 FROM checkout_sessions s
+  WHERE s.id = $4 AND s.tenant_id = $2 AND s.region_id = $3 AND s.status = 'open'
+)
 RETURNING id, checkout_id, COALESCE(product_id,''), COALESCE(variant_id,''), quantity, unit_price_cents, currency
 `, line.ID, tenantID, regionID, line.CheckoutID, line.ProductID, line.VariantID, line.Quantity, line.UnitPriceCents, line.Currency)
-	return scanLine(row)
+	out, err := scanLine(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		status, found, statusErr := r.sessionStatus(ctx, tenantID, regionID, line.CheckoutID)
+		if statusErr != nil {
+			return Line{}, statusErr
+		}
+		if !found {
+			return Line{}, ErrSessionNotFound
+		}
+		if status != "open" {
+			return Line{}, ErrSessionNotOpen
+		}
+	}
+	return out, err
 }
 
 func (r *PostgresRepository) UpdateSessionContext(ctx context.Context, tenantID, regionID, checkoutID string, in Session) (Session, error) {
@@ -95,12 +123,20 @@ SET voucher_code = NULLIF($4,''),
     billing_address_postal_code = NULLIF($13,''),
     updated_at = NOW()
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+  AND status = 'open'
 `, checkoutID, tenantID, regionID, in.VoucherCode, in.PromotionID, in.TaxClassID, in.CountryCode, in.ChannelID, in.ShippingMethodID, in.ShippingAddressCountry, in.ShippingAddressPostalCode, in.BillingAddressCountry, in.BillingAddressPostalCode)
 	if err != nil {
 		return Session{}, err
 	}
 	if rows, _ := res.RowsAffected(); rows == 0 {
-		return Session{}, ErrSessionNotFound
+		_, found, statusErr := r.sessionStatus(ctx, tenantID, regionID, checkoutID)
+		if statusErr != nil {
+			return Session{}, statusErr
+		}
+		if !found {
+			return Session{}, ErrSessionNotFound
+		}
+		return Session{}, ErrSessionNotOpen
 	}
 	return r.getSession(ctx, tenantID, regionID, checkoutID)
 }
@@ -577,6 +613,22 @@ func (r *PostgresRepository) sessionExists(ctx context.Context, tenantID, region
 SELECT 1 FROM checkout_sessions WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 `, checkoutID, tenantID, regionID).Scan(&found)
 	return err == nil
+}
+
+func (r *PostgresRepository) sessionStatus(ctx context.Context, tenantID, regionID, checkoutID string) (string, bool, error) {
+	var status string
+	err := r.db.QueryRowContext(ctx, `
+SELECT status
+FROM checkout_sessions
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+`, checkoutID, tenantID, regionID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return status, true, nil
 }
 
 func (r *PostgresRepository) getSession(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error) {

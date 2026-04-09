@@ -16,6 +16,8 @@ type fakeRepo struct {
 	completeErr    error
 	lines          []Line
 	paymentCovered bool
+	upsertErr      error
+	updateCtxErr   error
 }
 
 func (f *fakeRepo) CreateSession(_ context.Context, in Session) (Session, error) {
@@ -23,6 +25,9 @@ func (f *fakeRepo) CreateSession(_ context.Context, in Session) (Session, error)
 }
 
 func (f *fakeRepo) UpsertLine(_ context.Context, _, _ string, line Line) (Line, error) {
+	if f.upsertErr != nil {
+		return Line{}, f.upsertErr
+	}
 	return line, nil
 }
 
@@ -87,6 +92,9 @@ func (f *fakeRepo) GetVariantProductID(_ context.Context, _, _, variantID string
 }
 
 func (f *fakeRepo) UpdateSessionContext(_ context.Context, _, _, checkoutID string, in Session) (Session, error) {
+	if f.updateCtxErr != nil {
+		return Session{}, f.updateCtxErr
+	}
 	in.ID = checkoutID
 	in.Currency = "USD"
 	in.SubtotalCents = 1000
@@ -435,6 +443,29 @@ func TestUpsertLineRejectsCompletedSession(t *testing.T) {
 	}
 }
 
+func TestUpsertLineMapsRepositorySessionNotOpenToConflict(t *testing.T) {
+	repo := &fakeRepo{
+		upsertErr: ErrSessionNotOpen,
+		session:   Session{ID: "chk_1", Status: "open", Currency: "USD"},
+	}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	_, err := svc.UpsertLine(context.Background(), "tenant_a", "us", Line{
+		ID:             "ln_1",
+		CheckoutID:     "chk_1",
+		ProductID:      "prd_ok",
+		Quantity:       1,
+		UnitPriceCents: 1000,
+		Currency:       "USD",
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	apiErr, ok := err.(sharederrors.APIError)
+	if !ok || apiErr.Status != 409 {
+		t.Fatalf("expected 409 API error, got %#v", err)
+	}
+}
+
 func TestUpdateSessionContextRejectsChannelSwitchWithIncompatibleLines(t *testing.T) {
 	repo := &fakeRepo{
 		session: Session{ID: "chk_1", ChannelID: "web", Currency: "USD"},
@@ -473,6 +504,24 @@ func TestUpdateSessionContextAllowsCompatibleChannelSwitch(t *testing.T) {
 func TestUpdateSessionContextRejectsCompletedSession(t *testing.T) {
 	repo := &fakeRepo{
 		session: Session{ID: "chk_1", Status: "completed", ChannelID: "web", Currency: "USD"},
+	}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	_, err := svc.UpdateSessionContext(context.Background(), "tenant_a", "us", "chk_1", Session{
+		VoucherCode: "SAVE10",
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	apiErr, ok := err.(sharederrors.APIError)
+	if !ok || apiErr.Status != 409 {
+		t.Fatalf("expected 409 API error, got %#v", err)
+	}
+}
+
+func TestUpdateSessionContextMapsRepositorySessionNotOpenToConflict(t *testing.T) {
+	repo := &fakeRepo{
+		updateCtxErr: ErrSessionNotOpen,
+		session:      Session{ID: "chk_1", Status: "open", Currency: "USD"},
 	}
 	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
 	_, err := svc.UpdateSessionContext(context.Background(), "tenant_a", "us", "chk_1", Session{

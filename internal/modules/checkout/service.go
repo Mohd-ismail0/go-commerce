@@ -117,6 +117,9 @@ func (s *Service) UpsertLine(ctx context.Context, tenantID, regionID string, in 
 		if errors.Is(err, ErrSessionNotFound) {
 			return Line{}, sharederrors.NotFound(err.Error())
 		}
+		if errors.Is(err, ErrSessionNotOpen) {
+			return Line{}, sharederrors.Conflict(err.Error())
+		}
 		return Line{}, sharederrors.Internal("failed to save checkout line")
 	}
 	return line, nil
@@ -188,6 +191,9 @@ func (s *Service) UpdateSessionContext(ctx context.Context, tenantID, regionID, 
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			return Session{}, sharederrors.NotFound(err.Error())
+		}
+		if errors.Is(err, ErrSessionNotOpen) {
+			return Session{}, sharederrors.Conflict(err.Error())
 		}
 		return Session{}, sharederrors.Internal("failed to update checkout session context")
 	}
