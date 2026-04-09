@@ -7,9 +7,11 @@ import (
 )
 
 type stubRepo struct {
-	saveFn    func(ctx context.Context, in App) (App, error)
-	listFn    func(ctx context.Context, tenantID, regionID string, activeOnly bool) ([]App, error)
-	getByIDFn func(ctx context.Context, tenantID, regionID, id string) (App, bool, error)
+	saveFn            func(ctx context.Context, in App) (App, error)
+	listFn            func(ctx context.Context, tenantID, regionID string, activeOnly bool) ([]App, error)
+	getByIDFn         func(ctx context.Context, tenantID, regionID, id string) (App, bool, error)
+	deactivateHooksFn func(ctx context.Context, tenantID, regionID, appID string) error
+	deactivateCalls   int
 }
 
 func (s *stubRepo) Save(ctx context.Context, in App) (App, error) {
@@ -31,6 +33,14 @@ func (s *stubRepo) GetByID(ctx context.Context, tenantID, regionID, id string) (
 		return s.getByIDFn(ctx, tenantID, regionID, id)
 	}
 	return App{}, false, nil
+}
+
+func (s *stubRepo) DeactivateWebhookSubscriptionsByApp(ctx context.Context, tenantID, regionID, appID string) error {
+	s.deactivateCalls++
+	if s.deactivateHooksFn != nil {
+		return s.deactivateHooksFn(ctx, tenantID, regionID, appID)
+	}
+	return nil
 }
 
 func TestPatchPreservesAuthTokenWhenOmitted(t *testing.T) {
@@ -87,5 +97,24 @@ func TestSetActiveNotFound(t *testing.T) {
 	_, err := svc.SetActive(context.Background(), "t1", "r1", "missing", true)
 	if err == nil {
 		t.Fatalf("expected error")
+	}
+}
+
+func TestSetActiveFalseDeactivatesWebhookSubscriptions(t *testing.T) {
+	repo := &stubRepo{
+		getByIDFn: func(_ context.Context, _, _, _ string) (App, bool, error) {
+			return App{ID: "app_1", TenantID: "t1", RegionID: "r1", Name: "A", IsActive: true}, true, nil
+		},
+	}
+	svc := NewService(repo)
+	saved, err := svc.SetActive(context.Background(), "t1", "r1", "app_1", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if saved.IsActive {
+		t.Fatalf("expected app to be inactive")
+	}
+	if repo.deactivateCalls != 1 {
+		t.Fatalf("expected webhook deactivation call, got %d", repo.deactivateCalls)
 	}
 }

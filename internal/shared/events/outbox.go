@@ -110,9 +110,17 @@ type WebhookSubscription struct {
 
 func (s *OutboxStore) ListActiveWebhookSubscriptions(ctx context.Context, tenantID, regionID, eventName string) ([]WebhookSubscription, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, event_name, endpoint_url, COALESCE(secret,'')
-FROM webhook_subscriptions
-WHERE tenant_id=$1 AND region_id=$2 AND event_name=$3 AND is_active=TRUE
+SELECT ws.id, ws.event_name, ws.endpoint_url, COALESCE(ws.secret,'')
+FROM webhook_subscriptions ws
+LEFT JOIN apps a
+  ON a.id = ws.app_id
+ AND a.tenant_id = ws.tenant_id
+ AND a.region_id = ws.region_id
+WHERE ws.tenant_id=$1
+  AND ws.region_id=$2
+  AND ws.event_name=$3
+  AND ws.is_active=TRUE
+  AND (ws.app_id IS NULL OR COALESCE(a.is_active, FALSE)=TRUE)
 `, tenantID, regionID, eventName)
 	if err != nil {
 		return nil, err

@@ -16,6 +16,7 @@ type appRepo interface {
 	Save(ctx context.Context, in App) (App, error)
 	List(ctx context.Context, tenantID, regionID string, activeOnly bool) ([]App, error)
 	GetByID(ctx context.Context, tenantID, regionID, id string) (App, bool, error)
+	DeactivateWebhookSubscriptionsByApp(ctx context.Context, tenantID, regionID, appID string) error
 }
 
 func NewService(repo appRepo) *Service {
@@ -82,6 +83,11 @@ func (s *Service) SetActive(ctx context.Context, tenantID, regionID, appID strin
 	saved, saveErr := s.repo.Save(ctx, existing)
 	if saveErr != nil {
 		return App{}, sharederrors.Internal("failed to update app state")
+	}
+	if !active {
+		if err := s.repo.DeactivateWebhookSubscriptionsByApp(ctx, tenantID, regionID, existing.ID); err != nil {
+			return App{}, sharederrors.Internal("failed to deactivate app webhook subscriptions")
+		}
 	}
 	return saved, nil
 }

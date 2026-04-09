@@ -82,6 +82,19 @@ ORDER BY updated_at DESC
 	return out, rows.Err()
 }
 
+func (r *Repository) DeactivateWebhookSubscriptionsByApp(ctx context.Context, tenantID, regionID, appID string) error {
+	_, err := r.db.ExecContext(ctx, `
+UPDATE webhook_subscriptions
+SET is_active = FALSE,
+    updated_at = NOW()
+WHERE tenant_id = $1
+  AND region_id = $2
+  AND app_id = $3
+  AND is_active = TRUE
+`, tenantID, regionID, appID)
+	return err
+}
+
 func nullString(v string) sql.NullString {
 	return sql.NullString{String: v, Valid: v != ""}
 }
