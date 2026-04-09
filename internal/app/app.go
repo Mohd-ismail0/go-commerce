@@ -12,6 +12,7 @@ import (
 	"rewrite/internal/modules/apps"
 	"rewrite/internal/modules/brands"
 	"rewrite/internal/modules/catalog"
+	"rewrite/internal/modules/channels"
 	"rewrite/internal/modules/checkout"
 	"rewrite/internal/modules/customers"
 	"rewrite/internal/modules/fulfillments"
@@ -87,6 +88,7 @@ func New(ctx context.Context) (*App, error) {
 				{Prefix: "/identity/users", PermissionCode: "identity.users.manage"},
 				{Prefix: "/metadata", PermissionCode: "metadata.manage"},
 				{Prefix: "/apps/webhook-subscriptions", PermissionCode: "webhook.manage"},
+				{Prefix: "/channels", PermissionCode: "channel.manage"},
 			}, middleware.PolicyOptions{
 				UserJWTSecret:         cfg.AuthJWTSecret,
 				UserJWTKeys:           jwtKeys,
@@ -107,6 +109,7 @@ func New(ctx context.Context) (*App, error) {
 		pricing.NewHandler(pricingSvc),
 		promotions.NewHandler(promotionsSvc),
 		regions.NewHandler(regions.NewService(regions.NewRepository(conn))),
+		channels.NewHandler(channels.NewService(channels.NewRepository(conn))),
 		brands.NewHandler(brands.NewService(brands.NewRepository(conn))),
 		payments.NewHandler(paymentSvc, cfg.WebhookPaymentSecret, cfg.AppEnv),
 		shipping.NewHandler(shipping.NewService(shipping.NewRepository(conn))),

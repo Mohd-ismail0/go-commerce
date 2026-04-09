@@ -207,6 +207,22 @@ CREATE TABLE IF NOT EXISTS translations (
   UNIQUE (tenant_id, region_id, entity_type, entity_id, language_code)
 );
 
+CREATE TABLE IF NOT EXISTS channels (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  region_id TEXT NOT NULL,
+  slug TEXT NOT NULL,
+  name TEXT NOT NULL,
+  default_currency TEXT NOT NULL,
+  default_country TEXT NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (tenant_id, region_id, slug)
+);
+
+CREATE INDEX IF NOT EXISTS ix_channels_tenant_region ON channels (tenant_id, region_id);
+
 CREATE TABLE IF NOT EXISTS apps (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL,

@@ -447,6 +447,39 @@ components:
         name: { type: string }
         is_active: { type: boolean }
         auth_token: { type: string }
+    Channel:
+      type: object
+      required: [id, tenant_id, region_id, slug, name, default_currency, default_country, is_active]
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        region_id: { type: string }
+        slug: { type: string }
+        name: { type: string }
+        default_currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+        default_country:
+          type: string
+          pattern: "^[A-Z]{2}$"
+        is_active: { type: boolean }
+        updated_at:
+          type: string
+          format: date-time
+    ChannelInput:
+      type: object
+      required: [slug, name, default_currency, default_country]
+      properties:
+        id: { type: string }
+        slug: { type: string }
+        name: { type: string }
+        default_currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+        default_country:
+          type: string
+          pattern: "^[A-Z]{2}$"
+        is_active: { type: boolean }
     Customer:
       type: object
       properties:
@@ -884,6 +917,84 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: post_apps_webhook_subscriptions
+      summary: Create webhook subscription
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      security:
+        - UserHeaderAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookSubscriptionInput"
+      responses:
+        "201":
+          description: Webhook subscription saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookSubscription"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: patch_apps_webhook_subscriptions
+      summary: Update webhook subscription
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      security:
+        - UserHeaderAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookSubscriptionInput"
+      responses:
+        "201":
+          description: Webhook subscription saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookSubscription"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /apps:
     get:
       operationId: get_apps
@@ -961,84 +1072,6 @@ paths:
                 $ref: "#/components/schemas/App"
         "400":
           description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-    post:
-      operationId: post_apps_webhook_subscriptions
-      summary: Create webhook subscription
-      parameters:
-        - $ref: "#/components/parameters/TenantHeader"
-        - $ref: "#/components/parameters/RegionHeader"
-      security:
-        - UserHeaderAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/WebhookSubscriptionInput"
-      responses:
-        "201":
-          description: Webhook subscription saved
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/WebhookSubscription"
-        "400":
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-    patch:
-      operationId: patch_apps_webhook_subscriptions
-      summary: Update webhook subscription
-      parameters:
-        - $ref: "#/components/parameters/TenantHeader"
-        - $ref: "#/components/parameters/RegionHeader"
-      security:
-        - UserHeaderAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/WebhookSubscriptionInput"
-      responses:
-        "201":
-          description: Webhook subscription saved
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/WebhookSubscription"
-        "400":
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "403":
-          description: Forbidden
           content:
             application/json:
               schema:
@@ -1600,6 +1633,143 @@ paths:
           description: Voucher saved
         "400":
           description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /channels:
+    get:
+      operationId: get_channels
+      summary: List sales channels for tenant/region
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Channel list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ItemsResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Channel"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: post_channels
+      summary: Create or update sales channel
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChannelInput"
+      responses:
+        "201":
+          description: Channel saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Channel"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Slug conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: patch_channels
+      summary: Update sales channel
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChannelInput"
+      responses:
+        "201":
+          description: Channel saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Channel"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Slug conflict
           content:
             application/json:
               schema:
