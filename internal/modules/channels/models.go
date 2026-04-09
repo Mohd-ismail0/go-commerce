@@ -24,3 +24,17 @@ type ProductChannelListing struct {
 	PublishedAt       string `json:"published_at,omitempty"`
 	UpdatedAt         string `json:"updated_at,omitempty"`
 }
+
+// VariantChannelListing stores channel-specific variant pricing/publication.
+type VariantChannelListing struct {
+	ID          string `json:"id"`
+	TenantID    string `json:"tenant_id"`
+	RegionID    string `json:"region_id"`
+	VariantID   string `json:"variant_id"`
+	ChannelID   string `json:"channel_id"`
+	Currency    string `json:"currency"`
+	PriceCents  int64  `json:"price_cents"`
+	IsPublished bool   `json:"is_published"`
+	PublishedAt string `json:"published_at,omitempty"`
+	UpdatedAt   string `json:"updated_at,omitempty"`
+}

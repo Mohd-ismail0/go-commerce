@@ -521,6 +521,64 @@ components:
           type: string
           format: date-time
           nullable: true
+    VariantChannelListing:
+      type: object
+      required: [id, tenant_id, region_id, variant_id, channel_id, currency, price_cents, is_published]
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        region_id: { type: string }
+        variant_id: { type: string }
+        channel_id: { type: string }
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+        price_cents:
+          type: integer
+          format: int64
+          minimum: 1
+        is_published: { type: boolean }
+        published_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    VariantChannelListingInput:
+      type: object
+      required: [variant_id, currency, price_cents]
+      properties:
+        id: { type: string }
+        variant_id: { type: string }
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+        price_cents:
+          type: integer
+          format: int64
+          minimum: 1
+        is_published: { type: boolean }
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+    VariantChannelListingPatchInput:
+      type: object
+      required: [variant_id]
+      properties:
+        variant_id: { type: string }
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+        price_cents:
+          type: integer
+          format: int64
+          minimum: 1
+        is_published: { type: boolean }
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
     Customer:
       type: object
       properties:
@@ -1966,6 +2024,161 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Channel, product, or listing not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /channels/{channel_id}/variant-listings:
+    get:
+      operationId: get_channels_channel_id_variant_listings
+      summary: List variant listings for a channel
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: channel_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Variant channel listings
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ItemsResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/VariantChannelListing"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Channel not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: post_channels_channel_id_variant_listings
+      summary: Create or replace variant channel listing (upsert by variant and channel)
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: channel_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VariantChannelListingInput"
+      responses:
+        "201":
+          description: Listing saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VariantChannelListing"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Channel or variant not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: patch_channels_channel_id_variant_listings
+      summary: Partially update an existing variant channel listing
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: channel_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VariantChannelListingPatchInput"
+      responses:
+        "200":
+          description: Listing updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VariantChannelListing"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Channel, variant, or listing not found
           content:
             application/json:
               schema:

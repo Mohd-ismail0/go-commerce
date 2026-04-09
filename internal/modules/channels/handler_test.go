@@ -23,10 +23,15 @@ type stubChannelRepo struct {
 
 	channelExists       bool
 	productExists       bool
+	variantExists       bool
 	listingByChannelRet []ProductChannelListing
 	getListing          ProductChannelListing
 	getListingOK        bool
 	saveListingRet      ProductChannelListing
+	variantByChannelRet []VariantChannelListing
+	getVariantListing   VariantChannelListing
+	getVariantListingOK bool
+	saveVariantRet      VariantChannelListing
 }
 
 func (s *stubChannelRepo) SlugTaken(_ context.Context, _, _, _, _ string) (bool, error) {
@@ -64,6 +69,10 @@ func (s *stubChannelRepo) ProductExists(_ context.Context, _, _, _ string) (bool
 	return s.productExists, nil
 }
 
+func (s *stubChannelRepo) VariantExists(_ context.Context, _, _, _ string) (bool, error) {
+	return s.variantExists, nil
+}
+
 func (s *stubChannelRepo) GetProductListingByKeys(_ context.Context, _, _, _, _ string) (ProductChannelListing, bool, error) {
 	return s.getListing, s.getListingOK, nil
 }
@@ -75,6 +84,21 @@ func (s *stubChannelRepo) ListProductListingsByChannel(_ context.Context, _, _, 
 func (s *stubChannelRepo) SaveProductListing(_ context.Context, row ProductChannelListing, _ sql.NullTime) (ProductChannelListing, error) {
 	if s.saveListingRet.ID != "" {
 		return s.saveListingRet, nil
+	}
+	return row, nil
+}
+
+func (s *stubChannelRepo) GetVariantListingByKeys(_ context.Context, _, _, _, _ string) (VariantChannelListing, bool, error) {
+	return s.getVariantListing, s.getVariantListingOK, nil
+}
+
+func (s *stubChannelRepo) ListVariantListingsByChannel(_ context.Context, _, _, _ string) ([]VariantChannelListing, error) {
+	return s.variantByChannelRet, nil
+}
+
+func (s *stubChannelRepo) SaveVariantListing(_ context.Context, row VariantChannelListing, _ sql.NullTime) (VariantChannelListing, error) {
+	if s.saveVariantRet.ID != "" {
+		return s.saveVariantRet, nil
 	}
 	return row, nil
 }
@@ -157,6 +181,48 @@ func TestProductListingsPatchNotFoundWhenMissing(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPatch, "/channels/c1/product-listings", bytes.NewBufferString(
 		`{"product_id":"p1","is_published":true}`,
+	))
+	req.Header.Set("X-Tenant-ID", "t1")
+	req.Header.Set("X-Region-ID", "r1")
+	rr := httptest.NewRecorder()
+	rt.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestVariantListingsListRequiresExistingChannel(t *testing.T) {
+	repo := &stubChannelRepo{channelExists: false}
+	h := NewHandler(NewService(repo))
+	rt := chi.NewRouter()
+	rt.Use(middleware.TenantRegion("public", "global"))
+	h.RegisterRoutes(rt)
+
+	req := httptest.NewRequest(http.MethodGet, "/channels/c1/variant-listings", nil)
+	req.Header.Set("X-Tenant-ID", "t1")
+	req.Header.Set("X-Region-ID", "r1")
+	rr := httptest.NewRecorder()
+	rt.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestVariantListingsPatchNotFoundWhenMissing(t *testing.T) {
+	repo := &stubChannelRepo{
+		channelExists:       true,
+		variantExists:       true,
+		getVariantListingOK: false,
+	}
+	h := NewHandler(NewService(repo))
+	rt := chi.NewRouter()
+	rt.Use(middleware.TenantRegion("public", "global"))
+	h.RegisterRoutes(rt)
+
+	req := httptest.NewRequest(http.MethodPatch, "/channels/c1/variant-listings", bytes.NewBufferString(
+		`{"variant_id":"v1","price_cents":1500}`,
 	))
 	req.Header.Set("X-Tenant-ID", "t1")
 	req.Header.Set("X-Region-ID", "r1")

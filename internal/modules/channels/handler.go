@@ -28,6 +28,11 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 			r.Post("/", h.saveProductListing)
 			r.Patch("/", h.patchProductListing)
 		})
+		r.Route("/{channelID}/variant-listings", func(r chi.Router) {
+			r.Get("/", h.listVariantListings)
+			r.Post("/", h.saveVariantListing)
+			r.Patch("/", h.patchVariantListing)
+		})
 	})
 }
 
@@ -119,6 +124,65 @@ func (h *Handler) writeProductListing(w http.ResponseWriter, r *http.Request, pa
 			PublishedAt:       req.PublishedAt,
 			IsPublished:       req.IsPublished,
 			VisibleInListings: req.VisibleInListings,
+		},
+		patch,
+	)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	status := http.StatusCreated
+	if patch {
+		status = http.StatusOK
+	}
+	utils.JSON(w, status, saved)
+}
+
+func (h *Handler) listVariantListings(w http.ResponseWriter, r *http.Request) {
+	tenantID := middleware.TenantIDFromContext(r.Context())
+	regionID := middleware.RegionIDFromContext(r.Context())
+	channelID := strings.TrimSpace(chi.URLParam(r, "channelID"))
+	items, err := h.svc.ListVariantListings(r.Context(), tenantID, regionID, channelID)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *Handler) saveVariantListing(w http.ResponseWriter, r *http.Request) {
+	h.writeVariantListing(w, r, false)
+}
+
+func (h *Handler) patchVariantListing(w http.ResponseWriter, r *http.Request) {
+	h.writeVariantListing(w, r, true)
+}
+
+func (h *Handler) writeVariantListing(w http.ResponseWriter, r *http.Request, patch bool) {
+	var req struct {
+		ID          string  `json:"id"`
+		VariantID   string  `json:"variant_id"`
+		Currency    *string `json:"currency"`
+		PriceCents  *int64  `json:"price_cents"`
+		PublishedAt *string `json:"published_at"`
+		IsPublished *bool   `json:"is_published"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
+		return
+	}
+	channelID := strings.TrimSpace(chi.URLParam(r, "channelID"))
+	saved, err := h.svc.UpsertVariantListing(r.Context(),
+		middleware.TenantIDFromContext(r.Context()),
+		middleware.RegionIDFromContext(r.Context()),
+		channelID,
+		VariantListingInput{
+			ID:          req.ID,
+			VariantID:   req.VariantID,
+			Currency:    req.Currency,
+			PriceCents:  req.PriceCents,
+			PublishedAt: req.PublishedAt,
+			IsPublished: req.IsPublished,
 		},
 		patch,
 	)

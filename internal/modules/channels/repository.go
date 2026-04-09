@@ -100,6 +100,17 @@ SELECT EXISTS(
 	return ok, err
 }
 
+func (r *Repository) VariantExists(ctx context.Context, tenantID, regionID, variantID string) (bool, error) {
+	var ok bool
+	err := r.db.QueryRowContext(ctx, `
+SELECT EXISTS(
+  SELECT 1 FROM product_variants
+  WHERE tenant_id = $1 AND region_id = $2 AND id = $3
+)
+`, tenantID, regionID, variantID).Scan(&ok)
+	return ok, err
+}
+
 func (r *Repository) GetProductListingByKeys(ctx context.Context, tenantID, regionID, channelID, productID string) (ProductChannelListing, bool, error) {
 	var row ProductChannelListing
 	var updatedAt time.Time
@@ -176,6 +187,91 @@ RETURNING id, tenant_id, region_id, product_id, channel_id, is_published, visibl
 	)
 	if err != nil {
 		return ProductChannelListing{}, err
+	}
+	out.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+	if publishedOut.Valid {
+		out.PublishedAt = publishedOut.Time.UTC().Format(time.RFC3339Nano)
+	}
+	return out, nil
+}
+
+func (r *Repository) GetVariantListingByKeys(ctx context.Context, tenantID, regionID, channelID, variantID string) (VariantChannelListing, bool, error) {
+	var row VariantChannelListing
+	var updatedAt time.Time
+	var publishedAt sql.NullTime
+	err := r.db.QueryRowContext(ctx, `
+SELECT id, tenant_id, region_id, variant_id, channel_id, currency, price_cents, is_published, published_at, updated_at
+FROM variant_channel_listings
+WHERE tenant_id = $1 AND region_id = $2 AND channel_id = $3 AND variant_id = $4
+`, tenantID, regionID, channelID, variantID).Scan(
+		&row.ID, &row.TenantID, &row.RegionID, &row.VariantID, &row.ChannelID, &row.Currency,
+		&row.PriceCents, &row.IsPublished, &publishedAt, &updatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return VariantChannelListing{}, false, nil
+	}
+	if err != nil {
+		return VariantChannelListing{}, false, err
+	}
+	row.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+	if publishedAt.Valid {
+		row.PublishedAt = publishedAt.Time.UTC().Format(time.RFC3339Nano)
+	}
+	return row, true, nil
+}
+
+func (r *Repository) ListVariantListingsByChannel(ctx context.Context, tenantID, regionID, channelID string) ([]VariantChannelListing, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT id, tenant_id, region_id, variant_id, channel_id, currency, price_cents, is_published, published_at, updated_at
+FROM variant_channel_listings
+WHERE tenant_id = $1 AND region_id = $2 AND channel_id = $3
+ORDER BY updated_at DESC
+`, tenantID, regionID, channelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []VariantChannelListing
+	for rows.Next() {
+		var row VariantChannelListing
+		var updatedAt time.Time
+		var publishedAt sql.NullTime
+		if err := rows.Scan(
+			&row.ID, &row.TenantID, &row.RegionID, &row.VariantID, &row.ChannelID, &row.Currency,
+			&row.PriceCents, &row.IsPublished, &publishedAt, &updatedAt,
+		); err != nil {
+			return nil, err
+		}
+		row.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+		if publishedAt.Valid {
+			row.PublishedAt = publishedAt.Time.UTC().Format(time.RFC3339Nano)
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) SaveVariantListing(ctx context.Context, row VariantChannelListing, publishedAt sql.NullTime) (VariantChannelListing, error) {
+	var out VariantChannelListing
+	var updatedAt time.Time
+	var publishedOut sql.NullTime
+	err := r.db.QueryRowContext(ctx, `
+INSERT INTO variant_channel_listings (
+  id, tenant_id, region_id, variant_id, channel_id, currency, price_cents, is_published, published_at, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+ON CONFLICT (tenant_id, region_id, variant_id, channel_id) DO UPDATE SET
+  currency = EXCLUDED.currency,
+  price_cents = EXCLUDED.price_cents,
+  is_published = EXCLUDED.is_published,
+  published_at = EXCLUDED.published_at,
+  updated_at = NOW()
+RETURNING id, tenant_id, region_id, variant_id, channel_id, currency, price_cents, is_published, published_at, updated_at
+`, row.ID, row.TenantID, row.RegionID, row.VariantID, row.ChannelID, row.Currency, row.PriceCents, row.IsPublished, publishedAt).Scan(
+		&out.ID, &out.TenantID, &out.RegionID, &out.VariantID, &out.ChannelID, &out.Currency,
+		&out.PriceCents, &out.IsPublished, &publishedOut, &updatedAt,
+	)
+	if err != nil {
+		return VariantChannelListing{}, err
 	}
 	out.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
 	if publishedOut.Valid {
