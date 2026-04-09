@@ -25,7 +25,12 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
-	utils.JSON(w, http.StatusOK, h.svc.List(r.Context(), middleware.TenantIDFromContext(r.Context())))
+	items, err := h.svc.List(r.Context(), middleware.TenantIDFromContext(r.Context()), middleware.RegionIDFromContext(r.Context()))
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, items)
 }
 
 func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
@@ -36,5 +41,10 @@ func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 	}
 	c.TenantID = middleware.TenantIDFromContext(r.Context())
 	c.RegionID = middleware.RegionIDFromContext(r.Context())
-	utils.JSON(w, http.StatusCreated, h.svc.Save(r.Context(), c))
+	saved, err := h.svc.Save(r.Context(), c)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusCreated, saved)
 }

@@ -632,6 +632,15 @@ components:
         region_id: { type: string }
         email: { type: string }
         name: { type: string }
+    CustomerInput:
+      type: object
+      required: [email, name]
+      properties:
+        id: { type: string }
+        email:
+          type: string
+          format: email
+        name: { type: string }
     PriceBookEntry:
       type: object
       properties:
@@ -1791,6 +1800,12 @@ paths:
       responses:
         "200":
           description: Customer list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Customer"
         "400":
           description: Bad request
           content:
@@ -1803,11 +1818,27 @@ paths:
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerInput"
       responses:
         "201":
           description: Customer saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
         "400":
           description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
           content:
             application/json:
               schema:
