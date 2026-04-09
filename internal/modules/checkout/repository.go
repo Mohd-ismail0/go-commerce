@@ -452,6 +452,17 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),$7,$8,$9,$10,NOW(),NOW())
 		}
 	}
 	if _, err = tx.ExecContext(ctx, `
+UPDATE payments
+SET order_id = $4,
+    updated_at = NOW()
+WHERE tenant_id = $1
+  AND region_id = $2
+  AND checkout_id = $3
+  AND status IN ('authorized', 'partially_captured', 'captured')
+`, tenantID, regionID, checkoutID, orderID); err != nil {
+		return OrderCreatedPayload{}, err
+	}
+	if _, err = tx.ExecContext(ctx, `
 UPDATE checkout_sessions SET status = 'completed', updated_at = NOW()
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 `, checkoutID, tenantID, regionID); err != nil {

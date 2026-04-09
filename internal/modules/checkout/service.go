@@ -261,6 +261,18 @@ func (s *Service) Complete(ctx context.Context, tenantID, regionID, checkoutID s
 	if err != nil {
 		return CompleteResult{}, err
 	}
+	lines, err := s.repo.ListLines(ctx, tenantID, regionID, checkoutID)
+	if err != nil {
+		return CompleteResult{}, sharederrors.Internal("failed to validate checkout lines")
+	}
+	if len(lines) > 0 {
+		if strings.TrimSpace(recalculated.ShippingMethodID) == "" {
+			return CompleteResult{}, sharederrors.Conflict("shipping_method_id is required before checkout completion")
+		}
+		if strings.TrimSpace(recalculated.ShippingAddressCountry) == "" {
+			return CompleteResult{}, sharederrors.Conflict("shipping_address_country is required before checkout completion")
+		}
+	}
 	covered, err := s.repo.HasAuthorizedPaymentCoverage(ctx, tenantID, regionID, checkoutID, recalculated.TotalCents)
 	if err != nil {
 		return CompleteResult{}, sharederrors.Internal("failed to validate payment coverage")

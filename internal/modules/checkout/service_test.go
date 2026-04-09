@@ -218,7 +218,42 @@ func TestCompletePublishesOrderCreatedAndReturnsOrderID(t *testing.T) {
 }
 
 func TestCompleteRequiresAuthorizedPaymentCoverage(t *testing.T) {
-	repo := &fakeRepo{paymentCovered: false}
+	repo := &fakeRepo{
+		paymentCovered: false,
+		session: Session{
+			ID:                     "chk_1",
+			Status:                 "open",
+			Currency:               "USD",
+			ShippingMethodID:       "ship_std",
+			ShippingAddressCountry: "US",
+		},
+		lines: []Line{
+			{ID: "ln_1", CheckoutID: "chk_1", ProductID: "prd_ok", Quantity: 1, UnitPriceCents: 1000, Currency: "USD"},
+		},
+	}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	_, err := svc.Complete(context.Background(), "tenant_a", "us", "chk_1")
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	apiErr, ok := err.(sharederrors.APIError)
+	if !ok || apiErr.Status != 409 {
+		t.Fatalf("expected 409 API error, got %#v", err)
+	}
+}
+
+func TestCompleteRequiresShippingContextWhenCheckoutHasLines(t *testing.T) {
+	repo := &fakeRepo{
+		paymentCovered: true,
+		session: Session{
+			ID:       "chk_1",
+			Status:   "open",
+			Currency: "USD",
+		},
+		lines: []Line{
+			{ID: "ln_1", CheckoutID: "chk_1", ProductID: "prd_ok", Quantity: 1, UnitPriceCents: 1000, Currency: "USD"},
+		},
+	}
 	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
 	_, err := svc.Complete(context.Background(), "tenant_a", "us", "chk_1")
 	if err == nil {
