@@ -16,16 +16,18 @@ import (
 )
 
 type catalogFakeRepo struct {
-	items              []Product
-	productTranslations map[string]map[string]map[string]string
-	categoryTranslations map[string]map[string]map[string]string
+	items                  []Product
+	productTranslations    map[string]map[string]map[string]string
+	categoryTranslations   map[string]map[string]map[string]string
 	collectionTranslations map[string]map[string]map[string]string
-	variants           []ProductVariant
-	categories         []Category
-	collections        []Collection
-	collectionProducts map[string]map[string]bool
-	media              []ProductMedia
-	assignErr          error
+	variants               []ProductVariant
+	categories             []Category
+	collections            []Collection
+	collectionProducts     map[string]map[string]bool
+	media                  []ProductMedia
+	assignErr              error
+	productChannelFilter   map[string][]string
+	variantChannelFilter   map[string][]string
 }
 
 func TestProductsCreateRequiresIdempotencyKey(t *testing.T) {
@@ -57,6 +59,32 @@ func (r *catalogFakeRepo) List(_ context.Context, tenantID, _, _ string, _ *time
 		if p.TenantID == tenantID {
 			out = append(out, p)
 		}
+	}
+	return out, nil
+}
+
+func (r *catalogFakeRepo) ListProductsByChannel(_ context.Context, tenantID, _, channelID, _ string, onlyPublished bool, _ *time.Time, _ int32) ([]Product, error) {
+	out := []Product{}
+	for _, p := range r.items {
+		if p.TenantID != tenantID {
+			continue
+		}
+		if channels, ok := r.productChannelFilter[p.ID]; ok {
+			match := false
+			for _, c := range channels {
+				if c == channelID {
+					match = true
+					break
+				}
+			}
+			if !match {
+				continue
+			}
+		}
+		if onlyPublished && strings.HasPrefix(p.Name, "UNPUBLISHED:") {
+			continue
+		}
+		out = append(out, p)
 	}
 	return out, nil
 }
@@ -126,6 +154,32 @@ func (r *catalogFakeRepo) ListVariants(_ context.Context, tenantID, _, productID
 		if v.TenantID == tenantID && v.ProductID == productID {
 			out = append(out, v)
 		}
+	}
+	return out, nil
+}
+
+func (r *catalogFakeRepo) ListVariantsByChannel(_ context.Context, tenantID, _, productID, channelID string, onlyPublished bool) ([]ProductVariant, error) {
+	out := []ProductVariant{}
+	for _, v := range r.variants {
+		if v.TenantID != tenantID || v.ProductID != productID {
+			continue
+		}
+		if channels, ok := r.variantChannelFilter[v.ID]; ok {
+			match := false
+			for _, c := range channels {
+				if c == channelID {
+					match = true
+					break
+				}
+			}
+			if !match {
+				continue
+			}
+		}
+		if onlyPublished && strings.HasPrefix(v.Name, "UNPUBLISHED:") {
+			continue
+		}
+		out = append(out, v)
 	}
 	return out, nil
 }
@@ -416,6 +470,39 @@ func TestProductsListAppliesLanguageTranslationOverlay(t *testing.T) {
 	}
 }
 
+func TestProductsListFiltersByChannelAndPublishedState(t *testing.T) {
+	repo := &catalogFakeRepo{
+		items: []Product{
+			{ID: "p1", TenantID: "tenant_a", RegionID: "global", Name: "Published Product"},
+			{ID: "p2", TenantID: "tenant_a", RegionID: "global", Name: "UNPUBLISHED: Hidden Product"},
+			{ID: "p3", TenantID: "tenant_a", RegionID: "global", Name: "Other Channel Product"},
+		},
+		productChannelFilter: map[string][]string{
+			"p1": {"web"},
+			"p2": {"web"},
+			"p3": {"pos"},
+		},
+	}
+	h := NewHandler(NewService(repo, events.NewBus()))
+	r := chi.NewRouter()
+	r.Use(middleware.TenantRegion("public", "global"))
+	h.RegisterRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/products/?channel_id=web&published_only=true", nil)
+	req.Header.Set("X-Tenant-ID", "tenant_a")
+	req.Header.Set("X-Region-ID", "global")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rr.Code)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "Published Product") || strings.Contains(body, "UNPUBLISHED: Hidden Product") || strings.Contains(body, "Other Channel Product") {
+		t.Fatalf("expected only published web products, got: %s", body)
+	}
+}
+
 func TestCategoriesListAppliesLanguageTranslationOverlay(t *testing.T) {
 	repo := &catalogFakeRepo{
 		categories: []Category{
@@ -465,5 +552,38 @@ func TestCollectionsListAppliesLanguageTranslationOverlay(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "Collection FR") {
 		t.Fatalf("expected localized collection name, got: %s", rr.Body.String())
+	}
+}
+
+func TestVariantsListFiltersByChannelAndPublishedState(t *testing.T) {
+	repo := &catalogFakeRepo{
+		variants: []ProductVariant{
+			{ID: "v1", TenantID: "tenant_a", RegionID: "global", ProductID: "p1", Name: "Published Variant", SKU: "SKU-1", Currency: "USD", PriceCents: 100},
+			{ID: "v2", TenantID: "tenant_a", RegionID: "global", ProductID: "p1", Name: "UNPUBLISHED: Hidden Variant", SKU: "SKU-2", Currency: "USD", PriceCents: 110},
+			{ID: "v3", TenantID: "tenant_a", RegionID: "global", ProductID: "p1", Name: "Other Channel Variant", SKU: "SKU-3", Currency: "USD", PriceCents: 120},
+		},
+		variantChannelFilter: map[string][]string{
+			"v1": {"web"},
+			"v2": {"web"},
+			"v3": {"pos"},
+		},
+	}
+	h := NewHandler(NewService(repo, events.NewBus()))
+	r := chi.NewRouter()
+	r.Use(middleware.TenantRegion("public", "global"))
+	h.RegisterRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/products/p1/variants/?channel_id=web&published_only=true", nil)
+	req.Header.Set("X-Tenant-ID", "tenant_a")
+	req.Header.Set("X-Region-ID", "global")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rr.Code)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "Published Variant") || strings.Contains(body, "UNPUBLISHED: Hidden Variant") || strings.Contains(body, "Other Channel Variant") {
+		t.Fatalf("expected only published web variants, got: %s", body)
 	}
 }

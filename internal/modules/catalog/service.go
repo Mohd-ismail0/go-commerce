@@ -46,11 +46,17 @@ func (s *Service) Save(ctx context.Context, product Product, idempotencyKey stri
 	return saved, nil
 }
 
-func (s *Service) List(ctx context.Context, tenantID, regionID, sku, languageCode string, cursor *time.Time, limit int32) ([]Product, error) {
+func (s *Service) List(ctx context.Context, tenantID, regionID, sku, languageCode, channelID string, onlyPublished bool, cursor *time.Time, limit int32) ([]Product, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
-	items, err := s.repo.List(ctx, tenantID, regionID, sku, cursor, limit)
+	var items []Product
+	var err error
+	if strings.TrimSpace(channelID) != "" {
+		items, err = s.repo.ListProductsByChannel(ctx, tenantID, regionID, strings.TrimSpace(channelID), sku, onlyPublished, cursor, limit)
+	} else {
+		items, err = s.repo.List(ctx, tenantID, regionID, sku, cursor, limit)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -110,9 +116,12 @@ func (s *Service) SaveVariant(ctx context.Context, variant ProductVariant) (Prod
 	return saved, nil
 }
 
-func (s *Service) ListVariants(ctx context.Context, tenantID, regionID, productID string) ([]ProductVariant, error) {
+func (s *Service) ListVariants(ctx context.Context, tenantID, regionID, productID, channelID string, onlyPublished bool) ([]ProductVariant, error) {
 	if strings.TrimSpace(productID) == "" {
 		return nil, sharederrors.BadRequest("product_id is required")
+	}
+	if strings.TrimSpace(channelID) != "" {
+		return s.repo.ListVariantsByChannel(ctx, tenantID, regionID, productID, strings.TrimSpace(channelID), onlyPublished)
 	}
 	return s.repo.ListVariants(ctx, tenantID, regionID, productID)
 }

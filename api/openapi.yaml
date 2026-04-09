@@ -689,6 +689,16 @@ paths:
           description: Optional locale/language code used to overlay translated product fields.
           schema:
             type: string
+        - in: query
+          name: channel_id
+          description: Optional channel filter (uses product channel listings).
+          schema:
+            type: string
+        - in: query
+          name: published_only
+          description: When true with channel_id, only published channel listings are returned.
+          schema:
+            type: boolean
       responses:
         "200":
           description: Product list
@@ -1186,6 +1196,16 @@ paths:
           name: product_id
           required: true
           schema: { type: string }
+        - in: query
+          name: channel_id
+          description: Optional channel filter (uses variant channel listings).
+          schema:
+            type: string
+        - in: query
+          name: published_only
+          description: When true with channel_id, only published channel listings are returned.
+          schema:
+            type: boolean
       responses:
         "200":
           description: Product variants

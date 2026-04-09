@@ -50,6 +50,8 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	regionID := middleware.RegionIDFromContext(r.Context())
 	sku := strings.TrimSpace(r.URL.Query().Get("sku"))
 	languageCode := strings.TrimSpace(r.URL.Query().Get("language_code"))
+	channelID := strings.TrimSpace(r.URL.Query().Get("channel_id"))
+	publishedOnly := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("published_only")), "true")
 	limit := int32(20)
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil {
@@ -65,7 +67,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		}
 		cursor = &parsed
 	}
-	items, err := h.svc.List(r.Context(), tenantID, regionID, sku, languageCode, cursor, limit)
+	items, err := h.svc.List(r.Context(), tenantID, regionID, sku, languageCode, channelID, publishedOnly, cursor, limit)
 	if err != nil {
 		utils.WriteError(w, err)
 		return
@@ -133,7 +135,9 @@ func (h *Handler) listVariants(w http.ResponseWriter, r *http.Request) {
 	tenantID := middleware.TenantIDFromContext(r.Context())
 	regionID := middleware.RegionIDFromContext(r.Context())
 	productID := chi.URLParam(r, "productID")
-	items, err := h.svc.ListVariants(r.Context(), tenantID, regionID, productID)
+	channelID := strings.TrimSpace(r.URL.Query().Get("channel_id"))
+	publishedOnly := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("published_only")), "true")
+	items, err := h.svc.ListVariants(r.Context(), tenantID, regionID, productID, channelID, publishedOnly)
 	if err != nil {
 		utils.WriteError(w, err)
 		return

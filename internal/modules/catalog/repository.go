@@ -28,6 +28,8 @@ type Repository interface {
 	AssignProductToCollection(ctx context.Context, tenantID, regionID, collectionID, productID string) error
 	InsertProductMedia(ctx context.Context, media ProductMedia) (ProductMedia, error)
 	ListProductMedia(ctx context.Context, tenantID, regionID, productID string) ([]ProductMedia, error)
+	ListProductsByChannel(ctx context.Context, tenantID, regionID, channelID, sku string, onlyPublished bool, cursor *time.Time, limit int32) ([]Product, error)
+	ListVariantsByChannel(ctx context.Context, tenantID, regionID, productID, channelID string, onlyPublished bool) ([]ProductVariant, error)
 }
 
 func (r *PostgresRepository) ListProductTranslations(ctx context.Context, tenantID, regionID string, productIDs []string, languageCode string) (map[string]map[string]string, error) {
@@ -118,38 +120,38 @@ func (r *PostgresRepository) Upsert(ctx context.Context, product Product, idempo
 			})
 			if getErr == nil {
 				return Product{
-					ID:         existing.ID,
-					TenantID:   existing.TenantID,
-					RegionID:   existing.RegionID,
-					SKU:        existing.Sku,
-					Name:       existing.Name,
-					Slug:       existing.Slug.String,
-					Description: existing.Description.String,
-					SEOTitle:   existing.SeoTitle.String,
-					SEODescription: existing.SeoDescription.String,
-					Metadata:   metadataString(existing.Metadata),
+					ID:                existing.ID,
+					TenantID:          existing.TenantID,
+					RegionID:          existing.RegionID,
+					SKU:               existing.Sku,
+					Name:              existing.Name,
+					Slug:              existing.Slug.String,
+					Description:       existing.Description.String,
+					SEOTitle:          existing.SeoTitle.String,
+					SEODescription:    existing.SeoDescription.String,
+					Metadata:          metadataString(existing.Metadata),
 					ExternalReference: existing.ExternalReference.String,
-					Currency:   existing.Currency,
-					PriceCents: existing.PriceCents,
-					CreatedAt:  existing.CreatedAt.UTC().Format(time.RFC3339Nano),
+					Currency:          existing.Currency,
+					PriceCents:        existing.PriceCents,
+					CreatedAt:         existing.CreatedAt.UTC().Format(time.RFC3339Nano),
 				}, nil
 			}
 		}
 	}
 	row, err := r.queries.UpsertProduct(ctx, dbsqlc.UpsertProductParams{
-		ID:         product.ID,
-		TenantID:   product.TenantID,
-		RegionID:   product.RegionID,
-		Sku:        product.SKU,
-		Name:       product.Name,
-		Slug:       nullString(product.Slug),
-		Description: nullString(product.Description),
-		SeoTitle:   nullString(product.SEOTitle),
-		SeoDescription: nullString(product.SEODescription),
-		Metadata:   nullRawMessage(product.Metadata),
+		ID:                product.ID,
+		TenantID:          product.TenantID,
+		RegionID:          product.RegionID,
+		Sku:               product.SKU,
+		Name:              product.Name,
+		Slug:              nullString(product.Slug),
+		Description:       nullString(product.Description),
+		SeoTitle:          nullString(product.SEOTitle),
+		SeoDescription:    nullString(product.SEODescription),
+		Metadata:          nullRawMessage(product.Metadata),
 		ExternalReference: nullString(product.ExternalReference),
-		Currency:   product.Currency,
-		PriceCents: product.PriceCents,
+		Currency:          product.Currency,
+		PriceCents:        product.PriceCents,
 	})
 	if err != nil {
 		return Product{}, err
@@ -163,20 +165,20 @@ func (r *PostgresRepository) Upsert(ctx context.Context, product Product, idempo
 		})
 	}
 	return Product{
-		ID:         row.ID,
-		TenantID:   row.TenantID,
-		RegionID:   row.RegionID,
-		SKU:        row.Sku,
-		Name:       row.Name,
-		Slug:       row.Slug.String,
-		Description: row.Description.String,
-		SEOTitle:   row.SeoTitle.String,
-		SEODescription: row.SeoDescription.String,
-		Metadata:   metadataString(row.Metadata),
+		ID:                row.ID,
+		TenantID:          row.TenantID,
+		RegionID:          row.RegionID,
+		SKU:               row.Sku,
+		Name:              row.Name,
+		Slug:              row.Slug.String,
+		Description:       row.Description.String,
+		SEOTitle:          row.SeoTitle.String,
+		SEODescription:    row.SeoDescription.String,
+		Metadata:          metadataString(row.Metadata),
 		ExternalReference: row.ExternalReference.String,
-		Currency:   row.Currency,
-		PriceCents: row.PriceCents,
-		CreatedAt:  row.CreatedAt.UTC().Format(time.RFC3339Nano),
+		Currency:          row.Currency,
+		PriceCents:        row.PriceCents,
+		CreatedAt:         row.CreatedAt.UTC().Format(time.RFC3339Nano),
 	}, nil
 }
 
@@ -194,23 +196,75 @@ func (r *PostgresRepository) List(ctx context.Context, tenantID, regionID, sku s
 	out := make([]Product, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, Product{
-			ID:         row.ID,
-			TenantID:   row.TenantID,
-			RegionID:   row.RegionID,
-			SKU:        row.Sku,
-			Name:       row.Name,
-			Slug:       row.Slug.String,
-			Description: row.Description.String,
-			SEOTitle:   row.SeoTitle.String,
-			SEODescription: row.SeoDescription.String,
-			Metadata:   metadataString(row.Metadata),
+			ID:                row.ID,
+			TenantID:          row.TenantID,
+			RegionID:          row.RegionID,
+			SKU:               row.Sku,
+			Name:              row.Name,
+			Slug:              row.Slug.String,
+			Description:       row.Description.String,
+			SEOTitle:          row.SeoTitle.String,
+			SEODescription:    row.SeoDescription.String,
+			Metadata:          metadataString(row.Metadata),
 			ExternalReference: row.ExternalReference.String,
-			Currency:   row.Currency,
-			PriceCents: row.PriceCents,
-			CreatedAt:  row.CreatedAt.UTC().Format(time.RFC3339Nano),
+			Currency:          row.Currency,
+			PriceCents:        row.PriceCents,
+			CreatedAt:         row.CreatedAt.UTC().Format(time.RFC3339Nano),
 		})
 	}
 	return out, nil
+}
+
+func (r *PostgresRepository) ListProductsByChannel(ctx context.Context, tenantID, regionID, channelID, sku string, onlyPublished bool, cursor *time.Time, limit int32) ([]Product, error) {
+	query := `
+SELECT p.id, p.tenant_id, p.region_id, p.sku, p.name, p.slug, p.description, p.seo_title, p.seo_description, p.metadata, p.external_reference, p.currency, p.price_cents, p.created_at
+FROM products p
+JOIN product_channel_listings pcl
+  ON pcl.product_id = p.id
+ AND pcl.tenant_id = p.tenant_id
+ AND pcl.region_id = p.region_id
+WHERE p.tenant_id = $1
+  AND p.region_id = $2
+  AND pcl.channel_id = $3
+  AND ($4::text = '' OR p.sku = $4)
+  AND ($5::bool = false OR pcl.is_published = true)
+  AND ($6::timestamptz = '0001-01-01 00:00:00+00'::timestamptz OR p.created_at < $6)
+ORDER BY p.created_at DESC
+LIMIT $7
+`
+	rows, err := r.db.QueryContext(ctx, query, tenantID, regionID, channelID, sku, onlyPublished, derefTime(cursor), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Product{}
+	for rows.Next() {
+		var row Product
+		var slug, description, seoTitle, seoDescription, externalRef sql.NullString
+		var metadataRaw []byte
+		var metadata sql.NullString
+		var createdAt time.Time
+		if err := rows.Scan(
+			&row.ID, &row.TenantID, &row.RegionID, &row.SKU, &row.Name, &slug, &description, &seoTitle, &seoDescription,
+			&metadataRaw, &externalRef, &row.Currency, &row.PriceCents, &createdAt,
+		); err != nil {
+			return nil, err
+		}
+		row.Slug = slug.String
+		row.Description = description.String
+		row.SEOTitle = seoTitle.String
+		row.SEODescription = seoDescription.String
+		if len(metadataRaw) > 0 {
+			metadata = sql.NullString{String: string(metadataRaw), Valid: true}
+		}
+		if metadata.Valid {
+			row.Metadata = metadata.String
+		}
+		row.ExternalReference = externalRef.String
+		row.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
+		out = append(out, row)
+	}
+	return out, rows.Err()
 }
 
 func (r *PostgresRepository) IsProductSlugAvailable(ctx context.Context, tenantID, regionID, slug, productID string) (bool, error) {
@@ -281,12 +335,42 @@ func (r *PostgresRepository) ListVariants(ctx context.Context, tenantID, regionI
 	return out, nil
 }
 
+func (r *PostgresRepository) ListVariantsByChannel(ctx context.Context, tenantID, regionID, productID, channelID string, onlyPublished bool) ([]ProductVariant, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT v.id, v.tenant_id, v.region_id, v.product_id, v.sku, v.name, v.price_cents, v.currency
+FROM product_variants v
+JOIN variant_channel_listings vcl
+  ON vcl.variant_id = v.id
+ AND vcl.tenant_id = v.tenant_id
+ AND vcl.region_id = v.region_id
+WHERE v.tenant_id = $1
+  AND v.region_id = $2
+  AND v.product_id = $3
+  AND vcl.channel_id = $4
+  AND ($5::bool = false OR vcl.is_published = true)
+ORDER BY v.id
+`, tenantID, regionID, productID, channelID, onlyPublished)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ProductVariant{}
+	for rows.Next() {
+		var row ProductVariant
+		if err := rows.Scan(&row.ID, &row.TenantID, &row.RegionID, &row.ProductID, &row.SKU, &row.Name, &row.PriceCents, &row.Currency); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 func (r *PostgresRepository) IsSKUTenantRegionAvailable(ctx context.Context, tenantID, regionID, sku, variantID string) (bool, error) {
 	exists, err := r.queries.SkuExistsInTenantRegion(ctx, dbsqlc.SkuExistsInTenantRegionParams{
-		TenantID:  tenantID,
-		RegionID:  regionID,
-		Sku:       sku,
-		Column4:   variantID,
+		TenantID: tenantID,
+		RegionID: regionID,
+		Sku:      sku,
+		Column4:  variantID,
 	})
 	if err != nil {
 		return false, err
