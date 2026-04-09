@@ -53,6 +53,11 @@ func (s *Service) UpsertLine(ctx context.Context, tenantID, regionID string, in 
 		return Line{}, sharederrors.BadRequest("invalid checkout line")
 	}
 	in.Currency = strings.ToUpper(strings.TrimSpace(in.Currency))
+	in.ProductID = strings.TrimSpace(in.ProductID)
+	in.VariantID = strings.TrimSpace(in.VariantID)
+	if in.ProductID == "" && in.VariantID == "" {
+		return Line{}, sharederrors.BadRequest("either product_id or variant_id is required")
+	}
 	session, err := s.repo.GetSession(ctx, tenantID, regionID, in.CheckoutID)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
@@ -60,7 +65,25 @@ func (s *Service) UpsertLine(ctx context.Context, tenantID, regionID string, in 
 		}
 		return Line{}, sharederrors.Internal("failed to load checkout session")
 	}
-	if strings.TrimSpace(in.VariantID) != "" && strings.TrimSpace(session.ChannelID) != "" {
+	if !strings.EqualFold(strings.TrimSpace(session.Currency), in.Currency) {
+		return Line{}, sharederrors.BadRequest("checkout line currency must match session currency")
+	}
+	if in.VariantID != "" {
+		variantProductID, found, vErr := s.repo.GetVariantProductID(ctx, tenantID, regionID, in.VariantID)
+		if vErr != nil {
+			return Line{}, sharederrors.Internal("failed to validate variant identity")
+		}
+		if !found {
+			return Line{}, sharederrors.NotFound("variant not found")
+		}
+		if in.ProductID != "" && in.ProductID != variantProductID {
+			return Line{}, sharederrors.BadRequest("product_id does not match variant")
+		}
+		if in.ProductID == "" {
+			in.ProductID = variantProductID
+		}
+	}
+	if in.VariantID != "" && strings.TrimSpace(session.ChannelID) != "" {
 		priceCents, currency, isPublished, found, getErr := s.repo.GetVariantChannelListing(ctx, tenantID, regionID, session.ChannelID, in.VariantID)
 		if getErr != nil {
 			return Line{}, sharederrors.Internal("failed to validate channel variant listing")
@@ -72,7 +95,7 @@ func (s *Service) UpsertLine(ctx context.Context, tenantID, regionID string, in 
 			return Line{}, sharederrors.BadRequest("checkout line price/currency must match channel variant listing")
 		}
 	}
-	if strings.TrimSpace(in.ProductID) != "" && strings.TrimSpace(in.VariantID) == "" && strings.TrimSpace(session.ChannelID) != "" {
+	if in.ProductID != "" && in.VariantID == "" && strings.TrimSpace(session.ChannelID) != "" {
 		isPublished, found, getErr := s.repo.GetProductChannelListing(ctx, tenantID, regionID, session.ChannelID, in.ProductID)
 		if getErr != nil {
 			return Line{}, sharederrors.Internal("failed to validate channel product listing")

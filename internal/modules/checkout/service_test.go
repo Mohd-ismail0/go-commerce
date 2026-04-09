@@ -58,6 +58,16 @@ func (f *fakeRepo) GetVariantChannelListing(_ context.Context, _, _, channelID, 
 	return 0, "", false, false, nil
 }
 
+func (f *fakeRepo) GetVariantProductID(_ context.Context, _, _, variantID string) (string, bool, error) {
+	if variantID == "var_ok" || variantID == "var_unpublished" {
+		return "prd_ok", true, nil
+	}
+	if variantID == "var_other_product" {
+		return "prd_other", true, nil
+	}
+	return "", false, nil
+}
+
 func (f *fakeRepo) UpdateSessionContext(_ context.Context, _, _, checkoutID string, in Session) (Session, error) {
 	in.ID = checkoutID
 	in.Currency = "USD"
@@ -222,5 +232,57 @@ func TestUpsertLineRejectsUnpublishedProductForSessionChannel(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("expected error")
+	}
+}
+
+func TestUpsertLineRejectsSessionCurrencyMismatch(t *testing.T) {
+	repo := &fakeRepo{session: Session{ID: "chk_1", ChannelID: "web", Currency: "USD"}}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	_, err := svc.UpsertLine(context.Background(), "tenant_a", "us", Line{
+		ID:             "ln_1",
+		CheckoutID:     "chk_1",
+		ProductID:      "prd_ok",
+		Quantity:       1,
+		UnitPriceCents: 1200,
+		Currency:       "EUR",
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+}
+
+func TestUpsertLineRejectsVariantProductMismatch(t *testing.T) {
+	repo := &fakeRepo{session: Session{ID: "chk_1", ChannelID: "web", Currency: "USD"}}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	_, err := svc.UpsertLine(context.Background(), "tenant_a", "us", Line{
+		ID:             "ln_1",
+		CheckoutID:     "chk_1",
+		ProductID:      "prd_ok",
+		VariantID:      "var_other_product",
+		Quantity:       1,
+		UnitPriceCents: 1200,
+		Currency:       "USD",
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+}
+
+func TestUpsertLineAutoFillsProductFromVariant(t *testing.T) {
+	repo := &fakeRepo{session: Session{ID: "chk_1", ChannelID: "web", Currency: "USD"}}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	line, err := svc.UpsertLine(context.Background(), "tenant_a", "us", Line{
+		ID:             "ln_1",
+		CheckoutID:     "chk_1",
+		VariantID:      "var_ok",
+		Quantity:       1,
+		UnitPriceCents: 1200,
+		Currency:       "USD",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if line.ProductID != "prd_ok" {
+		t.Fatalf("expected product_id derived from variant, got %q", line.ProductID)
 	}
 }

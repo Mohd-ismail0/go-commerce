@@ -390,6 +390,7 @@ components:
     CheckoutLineInput:
       type: object
       required: [id, quantity, unit_price_cents, currency]
+      description: Provide at least one of `product_id` or `variant_id`; when both are provided they must refer to the same catalog variant relationship.
       properties:
         id: { type: string }
         product_id: { type: string }

@@ -26,6 +26,7 @@ type Repository interface {
 	ChannelIsActive(ctx context.Context, tenantID, regionID, channelID string) (bool, error)
 	GetProductChannelListing(ctx context.Context, tenantID, regionID, channelID, productID string) (bool, bool, error)
 	GetVariantChannelListing(ctx context.Context, tenantID, regionID, channelID, variantID string) (int64, string, bool, bool, error)
+	GetVariantProductID(ctx context.Context, tenantID, regionID, variantID string) (string, bool, error)
 	Recalculate(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error)
 	UpdatePricing(ctx context.Context, tenantID, regionID, checkoutID string, taxCents, totalCents int64) (Session, error)
 	Complete(ctx context.Context, tenantID, regionID, checkoutID, orderID string) (OrderCreatedPayload, error)
@@ -175,6 +176,22 @@ WHERE tenant_id = $1 AND region_id = $2 AND channel_id = $3 AND variant_id = $4
 		return 0, "", false, false, err
 	}
 	return priceCents, currency, isPublished, true, nil
+}
+
+func (r *PostgresRepository) GetVariantProductID(ctx context.Context, tenantID, regionID, variantID string) (string, bool, error) {
+	var productID string
+	err := r.db.QueryRowContext(ctx, `
+SELECT product_id
+FROM product_variants
+WHERE tenant_id = $1 AND region_id = $2 AND id = $3
+`, tenantID, regionID, variantID).Scan(&productID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return productID, true, nil
 }
 
 func (r *PostgresRepository) Complete(ctx context.Context, tenantID, regionID, checkoutID, orderID string) (OrderCreatedPayload, error) {
