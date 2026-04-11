@@ -11,9 +11,8 @@ import (
 )
 
 type serviceRepository interface {
-	Save(ctx context.Context, customer Customer) (Customer, error)
+	Save(ctx context.Context, customer Customer, idempotencyKey string) (Customer, error)
 	List(ctx context.Context, tenantID, regionID string) ([]Customer, error)
-	EmailTaken(ctx context.Context, tenantID, regionID, email, excludeID string) (bool, error)
 	ListAddresses(ctx context.Context, tenantID, regionID, customerID string) ([]Address, error)
 	SaveAddress(ctx context.Context, a Address) (Address, error)
 	DeleteAddress(ctx context.Context, tenantID, regionID, customerID, addressID string) error
@@ -27,7 +26,11 @@ func NewService(repo serviceRepository) *Service {
 	return &Service{repo: repo}
 }
 
-func (s *Service) Save(ctx context.Context, customer Customer) (Customer, error) {
+func (s *Service) Save(ctx context.Context, customer Customer, idempotencyKey string) (Customer, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return Customer{}, sharederrors.BadRequest("Idempotency-Key is required")
+	}
+	key := strings.TrimSpace(idempotencyKey)
 	customer.Email = strings.ToLower(strings.TrimSpace(customer.Email))
 	customer.Name = strings.TrimSpace(customer.Name)
 	if customer.Email == "" {
@@ -43,15 +46,17 @@ func (s *Service) Save(ctx context.Context, customer Customer) (Customer, error)
 	if customer.ID == "" {
 		customer.ID = utils.NewID("cus")
 	}
-	taken, err := s.repo.EmailTaken(ctx, customer.TenantID, customer.RegionID, customer.Email, customer.ID)
+	saved, err := s.repo.Save(ctx, customer, key)
 	if err != nil {
-		return Customer{}, sharederrors.Internal("failed to validate customer email")
-	}
-	if taken {
-		return Customer{}, sharederrors.Conflict("customer email already exists in tenant/region")
-	}
-	saved, err := s.repo.Save(ctx, customer)
-	if err != nil {
+		if errors.Is(err, ErrIdempotencyKeyRequired) {
+			return Customer{}, sharederrors.BadRequest("Idempotency-Key is required")
+		}
+		if errors.Is(err, ErrCustomerIdempotencyOrphan) {
+			return Customer{}, sharederrors.Internal("customer idempotency record is inconsistent")
+		}
+		if errors.Is(err, ErrCustomerEmailTaken) {
+			return Customer{}, sharederrors.Conflict("customer email already exists in tenant/region")
+		}
 		return Customer{}, sharederrors.Internal("failed to save customer")
 	}
 	return saved, nil

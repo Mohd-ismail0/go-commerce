@@ -4,23 +4,87 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
+
+	shareddb "rewrite/internal/shared/db"
+	dbsqlc "rewrite/internal/shared/db/sqlc"
 )
 
+const customerSaveIdempotencyScope = "customers.save"
+
 type Repository struct {
-	db *sql.DB
+	db      *sql.DB
+	queries *dbsqlc.Queries
 }
 
 var ErrCustomerNotFound = errors.New("customer not found")
 var ErrAddressNotFound = errors.New("address not found")
+var ErrIdempotencyKeyRequired = errors.New("customer idempotency key is required")
+var ErrCustomerIdempotencyOrphan = errors.New("idempotency record references missing customer")
+var ErrCustomerEmailTaken = errors.New("customer email already exists in tenant/region")
 
 func NewRepository(db *sql.DB) *Repository {
-	return &Repository{db: db}
+	return &Repository{db: db, queries: dbsqlc.New(db)}
 }
 
-func (r *Repository) Save(ctx context.Context, customer Customer) (Customer, error) {
+func (r *Repository) Save(ctx context.Context, customer Customer, idempotencyKey string) (Customer, error) {
+	key := strings.TrimSpace(idempotencyKey)
+	if key == "" {
+		return Customer{}, ErrIdempotencyKeyRequired
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Customer{}, err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	lockKey := customer.TenantID + "\x00" + customerSaveIdempotencyScope + "\x00" + key
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1::text))`, lockKey); err != nil {
+		return Customer{}, err
+	}
+
+	qtx := r.queries.WithTx(tx)
+	resourceID, idemErr := qtx.GetIdempotencyResource(ctx, dbsqlc.GetIdempotencyResourceParams{
+		TenantID:       customer.TenantID,
+		Scope:          customerSaveIdempotencyScope,
+		IdempotencyKey: key,
+	})
+	if idemErr == nil && resourceID != "" {
+		row := tx.QueryRowContext(ctx, `
+SELECT id, tenant_id, region_id, email, name FROM customers
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+`, resourceID, customer.TenantID, customer.RegionID)
+		var out Customer
+		if err := row.Scan(&out.ID, &out.TenantID, &out.RegionID, &out.Email, &out.Name); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return Customer{}, fmt.Errorf("%w: %q", ErrCustomerIdempotencyOrphan, resourceID)
+			}
+			return Customer{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return Customer{}, err
+		}
+		return out, nil
+	}
+	if idemErr != nil && !errors.Is(idemErr, sql.ErrNoRows) {
+		return Customer{}, idemErr
+	}
+
+	taken, err := emailTakenTx(ctx, tx, customer.TenantID, customer.RegionID, customer.Email, customer.ID)
+	if err != nil {
+		return Customer{}, err
+	}
+	if taken {
+		return Customer{}, ErrCustomerEmailTaken
+	}
+
 	var out Customer
-	err := r.db.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 INSERT INTO customers (id, tenant_id, region_id, email, name, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
 ON CONFLICT (id) DO UPDATE SET
@@ -34,9 +98,38 @@ RETURNING id, tenant_id, region_id, email, name
 		&out.ID, &out.TenantID, &out.RegionID, &out.Email, &out.Name,
 	)
 	if err != nil {
+		if shareddb.IsUniqueConstraintViolation(err, "ux_customers_tenant_region_email_ci") {
+			return Customer{}, ErrCustomerEmailTaken
+		}
+		return Customer{}, err
+	}
+
+	if err := qtx.SaveIdempotencyResource(ctx, dbsqlc.SaveIdempotencyResourceParams{
+		TenantID:       customer.TenantID,
+		Scope:          customerSaveIdempotencyScope,
+		IdempotencyKey: key,
+		ResourceID:     out.ID,
+	}); err != nil {
+		return Customer{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return Customer{}, err
 	}
 	return out, nil
+}
+
+func emailTakenTx(ctx context.Context, tx *sql.Tx, tenantID, regionID, email, excludeID string) (bool, error) {
+	var exists bool
+	err := tx.QueryRowContext(ctx, `
+SELECT EXISTS(
+	SELECT 1 FROM customers
+	WHERE tenant_id = $1
+	  AND region_id = $2
+	  AND LOWER(email) = LOWER($3)
+	  AND ($4::text = '' OR id <> $4)
+)
+`, tenantID, regionID, email, excludeID).Scan(&exists)
+	return exists, err
 }
 
 func (r *Repository) List(ctx context.Context, tenantID, regionID string) ([]Customer, error) {

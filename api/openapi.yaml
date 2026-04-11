@@ -2141,9 +2141,15 @@ paths:
     post:
       operationId: post_customers
       summary: Create or update customer
+      description: |
+        Idempotent by `Idempotency-Key` per tenant (scope `customers.save`). Retries with the same key return the
+        original customer row (`201`). Uses a transaction with `pg_advisory_xact_lock` so concurrent duplicate keys
+        cannot create two customers. Email uniqueness for the tenant/region is enforced inside the same transaction
+        (`LOWER(email)`), with replay skipping the duplicate check.
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
+        - $ref: "#/components/parameters/IdempotencyHeader"
       requestBody:
         required: true
         content:

@@ -3,47 +3,53 @@ package customers
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
 type stubRepo struct {
-	saveIn            Customer
-	saveOut           Customer
-	saveErr           error
-	listInTenant      string
-	listInRegion      string
-	listOut           []Customer
-	listErr           error
-	emailTakenIn      string
-	emailTakenExclude string
-	emailTakenOut     bool
-	emailTakenErr     error
-	listAddressesOut  []Address
-	listAddressesErr  error
-	saveAddressIn     Address
-	saveAddressOut    Address
-	saveAddressErr    error
-	deleteAddressErr  error
+	saveIn           Customer
+	saveOut          Customer
+	saveErr          error
+	idem             map[string]Customer
+	listInTenant     string
+	listInRegion     string
+	listOut          []Customer
+	listErr          error
+	listAddressesOut []Address
+	listAddressesErr error
+	saveAddressIn    Address
+	saveAddressOut   Address
+	saveAddressErr   error
+	deleteAddressErr error
 }
 
-func (s *stubRepo) Save(_ context.Context, customer Customer) (Customer, error) {
+func (s *stubRepo) Save(_ context.Context, customer Customer, idempotencyKey string) (Customer, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return Customer{}, ErrIdempotencyKeyRequired
+	}
+	k := customer.TenantID + "|" + customerSaveIdempotencyScope + "|" + strings.TrimSpace(idempotencyKey)
+	if s.idem == nil {
+		s.idem = make(map[string]Customer)
+	}
+	if prev, ok := s.idem[k]; ok {
+		return prev, nil
+	}
+	if s.saveErr != nil {
+		return Customer{}, s.saveErr
+	}
 	s.saveIn = customer
 	if s.saveOut.ID == "" {
 		s.saveOut = customer
 	}
-	return s.saveOut, s.saveErr
+	s.idem[k] = s.saveOut
+	return s.saveOut, nil
 }
 
 func (s *stubRepo) List(_ context.Context, tenantID, regionID string) ([]Customer, error) {
 	s.listInTenant = tenantID
 	s.listInRegion = regionID
 	return s.listOut, s.listErr
-}
-
-func (s *stubRepo) EmailTaken(_ context.Context, _ string, _ string, email, excludeID string) (bool, error) {
-	s.emailTakenIn = email
-	s.emailTakenExclude = excludeID
-	return s.emailTakenOut, s.emailTakenErr
 }
 
 func (s *stubRepo) ListAddresses(_ context.Context, _, _, _ string) ([]Address, error) {
@@ -74,9 +80,22 @@ func TestServiceSaveRequiresEmail(t *testing.T) {
 		TenantID: "t1",
 		RegionID: "r1",
 		Name:     "Jane",
-	})
+	}, "idem-1")
 	if err == nil {
 		t.Fatal("expected error for missing email")
+	}
+}
+
+func TestServiceSaveRequiresIdempotencyKey(t *testing.T) {
+	svc := NewService(&stubRepo{})
+	_, err := svc.Save(context.Background(), Customer{
+		TenantID: "t1",
+		RegionID: "r1",
+		Email:    "a@b.co",
+		Name:     "N",
+	}, "  ")
+	if err == nil {
+		t.Fatal("expected error")
 	}
 }
 
@@ -88,7 +107,7 @@ func TestServiceSaveNormalizesEmailAndGeneratesID(t *testing.T) {
 		RegionID: "r1",
 		Email:    "  Jane@Example.COM ",
 		Name:     " Jane Doe ",
-	})
+	}, "idem-norm")
 	if err != nil {
 		t.Fatalf("save failed: %v", err)
 	}
@@ -104,7 +123,7 @@ func TestServiceSaveNormalizesEmailAndGeneratesID(t *testing.T) {
 }
 
 func TestServiceSaveRejectsDuplicateEmail(t *testing.T) {
-	repo := &stubRepo{emailTakenOut: true}
+	repo := &stubRepo{saveErr: ErrCustomerEmailTaken}
 	svc := NewService(repo)
 	_, err := svc.Save(context.Background(), Customer{
 		TenantID: "t1",
@@ -112,9 +131,37 @@ func TestServiceSaveRejectsDuplicateEmail(t *testing.T) {
 		ID:       "c1",
 		Email:    "jane@example.com",
 		Name:     "Jane",
-	})
+	}, "idem-dup")
 	if err == nil {
 		t.Fatal("expected conflict error for duplicate email")
+	}
+}
+
+func TestServiceSaveIdempotentReplayReturnsFirstCustomer(t *testing.T) {
+	repo := &stubRepo{}
+	svc := NewService(repo)
+	first, err := svc.Save(context.Background(), Customer{
+		TenantID: "t1",
+		RegionID: "r1",
+		ID:       "cus_first",
+		Email:    "a@b.co",
+		Name:     "First",
+	}, "same-key")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	second, err := svc.Save(context.Background(), Customer{
+		TenantID: "t1",
+		RegionID: "r1",
+		ID:       "cus_second",
+		Email:    "a@b.co",
+		Name:     "Second",
+	}, "same-key")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if first.ID != second.ID || first.Name != "First" {
+		t.Fatalf("expected replay of first customer, got first=%+v second=%+v", first, second)
 	}
 }
 

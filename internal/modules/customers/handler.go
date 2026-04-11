@@ -3,6 +3,7 @@ package customers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"rewrite/internal/shared/middleware"
@@ -47,7 +48,12 @@ func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 	}
 	c.TenantID = middleware.TenantIDFromContext(r.Context())
 	c.RegionID = middleware.RegionIDFromContext(r.Context())
-	saved, err := h.svc.Save(r.Context(), c)
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "Idempotency-Key header is required"})
+		return
+	}
+	saved, err := h.svc.Save(r.Context(), c, idempotencyKey)
 	if err != nil {
 		utils.WriteError(w, err)
 		return
