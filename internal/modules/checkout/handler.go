@@ -28,6 +28,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Put("/sessions/{checkout_id}/lines", h.upsertLine)
 		r.Post("/sessions/{checkout_id}/recalculate", h.recalculate)
 		r.Post("/sessions/{checkout_id}/apply-customer-addresses", h.applyCustomerAddresses)
+		r.Post("/sessions/{checkout_id}/gift-card", h.applyGiftCard)
+		r.Delete("/sessions/{checkout_id}/gift-card", h.removeGiftCard)
 		r.Post("/sessions/{checkout_id}/complete", h.complete)
 	})
 }
@@ -222,6 +224,54 @@ func (h *Handler) applyCustomerAddresses(w http.ResponseWriter, r *http.Request)
 		chi.URLParam(r, "checkout_id"),
 		req.ShippingAddressID,
 		req.BillingAddressID,
+		idempotencyKey,
+	)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, updated)
+}
+
+func (h *Handler) applyGiftCard(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
+		return
+	}
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "Idempotency-Key header is required"})
+		return
+	}
+	updated, err := h.svc.ApplyGiftCard(
+		r.Context(),
+		middleware.TenantIDFromContext(r.Context()),
+		middleware.RegionIDFromContext(r.Context()),
+		chi.URLParam(r, "checkout_id"),
+		req.Code,
+		idempotencyKey,
+	)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, updated)
+}
+
+func (h *Handler) removeGiftCard(w http.ResponseWriter, r *http.Request) {
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "Idempotency-Key header is required"})
+		return
+	}
+	updated, err := h.svc.RemoveGiftCard(
+		r.Context(),
+		middleware.TenantIDFromContext(r.Context()),
+		middleware.RegionIDFromContext(r.Context()),
+		chi.URLParam(r, "checkout_id"),
 		idempotencyKey,
 	)
 	if err != nil {

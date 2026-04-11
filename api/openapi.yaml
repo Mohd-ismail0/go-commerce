@@ -501,9 +501,74 @@ components:
         shipping_cents: { type: integer, format: int64 }
         tax_cents: { type: integer, format: int64 }
         total_cents: { type: integer, format: int64 }
+        gift_card_id: { type: string }
+        gift_card_applied_cents: { type: integer, format: int64 }
         updated_at:
           type: string
           format: date-time
+    CheckoutGiftCardApplyInput:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+    GiftCard:
+      type: object
+      required: [id, tenant_id, region_id, code, balance_cents, currency, is_active]
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        region_id: { type: string }
+        code: { type: string }
+        balance_cents: { type: integer, format: int64 }
+        currency: { type: string }
+        is_active: { type: boolean }
+        expires_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    GiftCardListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/GiftCard"
+    Invoice:
+      type: object
+      required: [id, tenant_id, region_id, order_id, invoice_number, status, total_cents, currency]
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        region_id: { type: string }
+        order_id: { type: string }
+        invoice_number: { type: string }
+        status: { type: string, enum: [draft, issued, void] }
+        total_cents: { type: integer, format: int64 }
+        currency: { type: string }
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    InvoiceCreateInput:
+      type: object
+      required: [order_id, status]
+      properties:
+        id: { type: string }
+        order_id: { type: string }
+        invoice_number: { type: string }
+        status: { type: string, enum: [draft, issued, void] }
+        metadata:
+          type: object
+          additionalProperties: true
+    InvoiceListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Invoice"
     CheckoutSessionCreateInput:
       type: object
       required: [customer_id, currency]
@@ -1199,6 +1264,90 @@ paths:
                 $ref: "#/components/schemas/CheckoutValidationReport"
         "404":
           description: Checkout not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /checkouts/sessions/{checkout_id}/gift-card:
+    post:
+      operationId: post_checkouts_sessions_by_checkout_id_gift_card
+      summary: Apply gift card to checkout
+      description: |
+        Idempotent by `Idempotency-Key`; scope `checkouts.gift_card.apply:{checkout_id}`. Locks the session and gift card row;
+        at most one **open** checkout may reference a given card. After apply, totals are refreshed when the pricing engine is configured (same as apply-customer-addresses).
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - $ref: "#/components/parameters/IdempotencyHeader"
+        - in: path
+          name: checkout_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckoutGiftCardApplyInput"
+      responses:
+        "200":
+          description: Session with gift card attached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutSession"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Checkout or card not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict (inactive card, wrong currency, card in use on another open checkout, etc.)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: delete_checkouts_sessions_by_checkout_id_gift_card
+      summary: Remove gift card from checkout
+      description: |
+        Idempotent by `Idempotency-Key`; scope `checkouts.gift_card.remove:{checkout_id}`. Clears `gift_card_id` and `gift_card_applied_cents`, then recalculates when a pricing calculator is configured.
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - $ref: "#/components/parameters/IdempotencyHeader"
+        - in: path
+          name: checkout_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Session updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutSession"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Checkout not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Session not open
           content:
             application/json:
               schema:
@@ -3215,6 +3364,171 @@ paths:
                 $ref: "#/components/schemas/ShopSettings"
         "400":
           description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /gift-cards:
+    get:
+      operationId: get_gift_cards
+      summary: List gift cards
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Gift card list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GiftCardListResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: post_gift_cards
+      summary: Create gift card
+      description: |
+        Idempotent by `Idempotency-Key`; scope `gift_cards.create` with advisory lock + idempotency save in the same transaction as insert.
+        `code` is stored uppercase per tenant/region unique constraint.
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - $ref: "#/components/parameters/IdempotencyHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, balance_cents, currency]
+              properties:
+                id: { type: string }
+                code: { type: string }
+                balance_cents: { type: integer, format: int64 }
+                currency: { type: string }
+                is_active: { type: boolean }
+                expires_at: { type: string, format: date-time }
+      responses:
+        "201":
+          description: Gift card created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GiftCard"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Duplicate code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /invoices:
+    get:
+      operationId: get_invoices
+      summary: List invoices for an order
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: query
+          name: order_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Invoice list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceListResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: post_invoices
+      summary: Create invoice for an order
+      description: |
+        Idempotent by `Idempotency-Key`; scope `invoices.create`. Locks the order row; `total_cents` and `currency` are copied from the order.
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - $ref: "#/components/parameters/IdempotencyHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvoiceCreateInput"
+      responses:
+        "201":
+          description: Invoice created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Order not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /invoices/{invoice_id}:
+    get:
+      operationId: get_invoices_by_id
+      summary: Get invoice by id
+      security:
+        - ApiTokenAuth: []
+          RoleHeaderAuth: []
+          UserHeaderAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: invoice_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Invoice
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+        "404":
+          description: Not found
           content:
             application/json:
               schema:

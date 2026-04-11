@@ -74,6 +74,24 @@ func (s *Service) ValidateCheckout(ctx context.Context, tenantID, regionID, chec
 				Code: "payment_coverage_required", Message: "authorized payment coverage is required before completion", Severity: "error",
 			})
 		}
+		if strings.TrimSpace(sess.GiftCardID) != "" {
+			if gerr := s.repo.ValidateGiftCardForSession(ctx, tenantID, regionID, sess); gerr != nil {
+				switch {
+				case errors.Is(gerr, ErrGiftCardNotFound):
+					report.Problems = append(report.Problems, CheckoutProblem{Code: "gift_card_not_found", Message: gerr.Error(), Severity: "error"})
+				case errors.Is(gerr, ErrGiftCardInactive):
+					report.Problems = append(report.Problems, CheckoutProblem{Code: "gift_card_inactive", Message: gerr.Error(), Severity: "error"})
+				case errors.Is(gerr, ErrGiftCardExpired):
+					report.Problems = append(report.Problems, CheckoutProblem{Code: "gift_card_expired", Message: gerr.Error(), Severity: "error"})
+				case errors.Is(gerr, ErrGiftCardCurrencyMismatch):
+					report.Problems = append(report.Problems, CheckoutProblem{Code: "gift_card_currency_mismatch", Message: gerr.Error(), Severity: "error"})
+				case errors.Is(gerr, ErrGiftCardDepleted):
+					report.Problems = append(report.Problems, CheckoutProblem{Code: "gift_card_depleted", Message: gerr.Error(), Severity: "error"})
+				default:
+					return CheckoutValidationReport{}, sharederrors.Internal("failed to validate gift card")
+				}
+			}
+		}
 		if ch := strings.TrimSpace(sess.ChannelID); ch != "" {
 			active, err := s.repo.ChannelIsActive(ctx, tenantID, regionID, ch)
 			if err != nil {
@@ -413,6 +431,71 @@ func (s *Service) ApplyCustomerAddresses(ctx context.Context, tenantID, regionID
 	return s.Recalculate(ctx, tenantID, regionID, checkoutID, "")
 }
 
+// ApplyGiftCard attaches a gift card to an open checkout (at most one open checkout may hold a given card). Recalculate runs when a pricing calculator is configured.
+func (s *Service) ApplyGiftCard(ctx context.Context, tenantID, regionID, checkoutID, code, idempotencyKey string) (Session, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return Session{}, sharederrors.BadRequest("Idempotency-Key is required")
+	}
+	key := strings.TrimSpace(idempotencyKey)
+	if strings.TrimSpace(checkoutID) == "" {
+		return Session{}, sharederrors.BadRequest("checkout_id is required")
+	}
+	session, err := s.repo.ApplyGiftCardToCheckout(ctx, tenantID, regionID, checkoutID, code, key)
+	if err != nil {
+		if errors.Is(err, ErrCheckoutGiftCardApplyIdempotencyKeyRequired) {
+			return Session{}, sharederrors.BadRequest("Idempotency-Key is required")
+		}
+		if errors.Is(err, ErrCheckoutGiftCardApplyIdempotencyOrphan) || errors.Is(err, ErrCheckoutGiftCardApplyIdempotencyMismatch) {
+			return Session{}, sharederrors.Internal("checkout gift card apply idempotency record is inconsistent")
+		}
+		if errors.Is(err, ErrSessionNotFound) {
+			return Session{}, sharederrors.NotFound(err.Error())
+		}
+		if errors.Is(err, ErrGiftCardNotFound) {
+			return Session{}, sharederrors.NotFound(err.Error())
+		}
+		if errors.Is(err, ErrGiftCardInactive) || errors.Is(err, ErrGiftCardExpired) || errors.Is(err, ErrGiftCardCurrencyMismatch) || errors.Is(err, ErrGiftCardInUse) || errors.Is(err, ErrGiftCardDepleted) {
+			return Session{}, sharederrors.Conflict(err.Error())
+		}
+		return Session{}, sharederrors.Internal("failed to apply gift card to checkout")
+	}
+	if s.calculator == nil {
+		return session, nil
+	}
+	return s.Recalculate(ctx, tenantID, regionID, checkoutID, "")
+}
+
+// RemoveGiftCard clears a gift card from an open checkout. Recalculate runs when a pricing calculator is configured.
+func (s *Service) RemoveGiftCard(ctx context.Context, tenantID, regionID, checkoutID, idempotencyKey string) (Session, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return Session{}, sharederrors.BadRequest("Idempotency-Key is required")
+	}
+	key := strings.TrimSpace(idempotencyKey)
+	if strings.TrimSpace(checkoutID) == "" {
+		return Session{}, sharederrors.BadRequest("checkout_id is required")
+	}
+	session, err := s.repo.RemoveGiftCardFromCheckout(ctx, tenantID, regionID, checkoutID, key)
+	if err != nil {
+		if errors.Is(err, ErrCheckoutGiftCardRemoveIdempotencyKeyRequired) {
+			return Session{}, sharederrors.BadRequest("Idempotency-Key is required")
+		}
+		if errors.Is(err, ErrCheckoutGiftCardRemoveIdempotencyOrphan) || errors.Is(err, ErrCheckoutGiftCardRemoveIdempotencyMismatch) {
+			return Session{}, sharederrors.Internal("checkout gift card remove idempotency record is inconsistent")
+		}
+		if errors.Is(err, ErrSessionNotFound) {
+			return Session{}, sharederrors.NotFound(err.Error())
+		}
+		if errors.Is(err, ErrSessionNotOpen) {
+			return Session{}, sharederrors.Conflict(err.Error())
+		}
+		return Session{}, sharederrors.Internal("failed to remove gift card from checkout")
+	}
+	if s.calculator == nil {
+		return session, nil
+	}
+	return s.Recalculate(ctx, tenantID, regionID, checkoutID, "")
+}
+
 // Recalculate refreshes subtotal from lines, then shipping and tax/total when a pricing calculator is configured.
 // Pass an empty idempotencyKey for internal orchestration (e.g. complete checkout, context updates); the HTTP handler always supplies a key.
 func (s *Service) Recalculate(ctx context.Context, tenantID, regionID, checkoutID, idempotencyKey string) (Session, error) {
@@ -447,6 +530,9 @@ func (s *Service) Recalculate(ctx context.Context, tenantID, regionID, checkoutI
 			return Session{}, sharederrors.Conflict(err.Error())
 		}
 		if errors.Is(err, ErrShippingAddressCountryRequired) || errors.Is(err, ErrShippingMethodNotEligible) {
+			return Session{}, sharederrors.Conflict(err.Error())
+		}
+		if errors.Is(err, ErrGiftCardNotFound) || errors.Is(err, ErrGiftCardInactive) || errors.Is(err, ErrGiftCardExpired) || errors.Is(err, ErrGiftCardCurrencyMismatch) {
 			return Session{}, sharederrors.Conflict(err.Error())
 		}
 		return Session{}, sharederrors.Internal("failed to recalculate checkout totals")
@@ -518,6 +604,9 @@ func (s *Service) Complete(ctx context.Context, tenantID, regionID, checkoutID, 
 			return CompleteResult{}, sharederrors.Conflict(err.Error())
 		}
 		if errors.Is(err, ErrVoucherUnavailable) {
+			return CompleteResult{}, sharederrors.Conflict(err.Error())
+		}
+		if errors.Is(err, ErrGiftCardDepleted) {
 			return CompleteResult{}, sharederrors.Conflict(err.Error())
 		}
 		if errors.Is(err, ErrChannelListingMismatch) {

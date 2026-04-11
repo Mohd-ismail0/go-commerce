@@ -21,6 +21,8 @@ type Session struct {
 	ShippingCents             int64  `json:"shipping_cents"`
 	TaxCents                  int64  `json:"tax_cents"`
 	TotalCents                int64  `json:"total_cents"`
+	GiftCardID                string `json:"gift_card_id,omitempty"`
+	GiftCardAppliedCents      int64  `json:"gift_card_applied_cents"`
 	UpdatedAt                 string `json:"updated_at,omitempty"`
 }
 

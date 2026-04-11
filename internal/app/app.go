@@ -16,7 +16,9 @@ import (
 	"rewrite/internal/modules/checkout"
 	"rewrite/internal/modules/customers"
 	"rewrite/internal/modules/fulfillments"
+	"rewrite/internal/modules/giftcard"
 	"rewrite/internal/modules/identity"
+	"rewrite/internal/modules/invoice"
 	"rewrite/internal/modules/inventory"
 	"rewrite/internal/modules/localization"
 	"rewrite/internal/modules/metadata"
@@ -93,6 +95,8 @@ func New(ctx context.Context) (*App, error) {
 				{Prefix: "/webhooks/deliveries", PermissionCode: "webhook.manage"},
 				{Prefix: "/webhooks/outbox", PermissionCode: "webhook.manage"},
 				{Prefix: "/channels", PermissionCode: "channel.manage"},
+				{Prefix: "/gift-cards", PermissionCode: "gift_cards.manage"},
+				{Prefix: "/invoices", PermissionCode: "invoices.manage"},
 			}, middleware.PolicyOptions{
 				UserJWTSecret:         cfg.AuthJWTSecret,
 				UserJWTKeys:           jwtKeys,
@@ -124,6 +128,8 @@ func New(ctx context.Context) (*App, error) {
 		metadata.NewHandler(metadata.NewService(metadata.NewRepository(conn))),
 		search.NewHandler(search.NewService(search.NewRepository(conn))),
 		shop.NewHandler(shop.NewService(shop.NewRepository(conn))),
+		giftcard.NewHandler(giftcard.NewService(giftcard.NewRepository(conn), conn)),
+		invoice.NewHandler(invoice.NewService(invoice.NewRepository(conn), conn)),
 	)
 	return &App{
 		srv:    s,

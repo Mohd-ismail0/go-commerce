@@ -18,19 +18,22 @@ This matrix tracks **functional parity** between [Saleor](https://github.com/sal
 - `internal/app/app.go` — wired handlers.
 - `internal/modules/*` — behavior and persistence.
 
-_Last updated: 2026-04-11 — shop settings (`GET`/`PATCH /shop/settings`), checkout **`GET .../validation`**, inventory **`GET`/`POST /inventory/warehouses`, shipping method metadata + weight surcharge quoting on resolve._
+_Last updated: 2026-04-11 — **gift cards** (`/gift-cards`, checkout `POST`/`DELETE .../gift-card`, balance apply on recalculate, deduct on complete), **order invoices** (`/invoices`), payment coverage when `total_cents` is 0 after gift card._
 
-### Parity scope and gap rate
+### Parity scope and gap rate (full Saleor ecosystem view)
 
-Saleor’s full Django/GraphQL surface (CMS, gift cards, invoices, plugin store, CSV jobs, etc.) is **not** a goal for this REST rewrite. To make “&lt;10% gap” meaningful, we track a **storefront + ops core** slice only.
+This matrix compares the rewrite to **Saleor’s broad platform** (all Django apps and major storefront/dashboard capabilities), not a trimmed storefront-only subset.
 
-**Included in the metric:** every capability row from **API contract vs router** through **Fulfillments** below (each table row = one unit).
+**Counted units (denominator):**
 
-**Excluded from both numerator and denominator:** rows tagged **(excluded from metric)** — ecosystem features we are not targeting in this parity pass (they remain **Gap** in the matrix for honesty, but do not move the percentage).
+1. Each row in **Saleor Django apps vs rewrite** (high-level app coverage).
+2. Each capability row from **API contract vs router** through **Fulfillments**, plus **Localization, metadata, search** and **Regions & brands** (detailed parity).
 
-**Formula:** `gap_rate = (# of **Gap** rows in scope) / (total rows in scope)`.
+**Gap rate:** `(# of rows whose status is **Gap**) / (denominator)`.
 
-**Current snapshot:** 52 capability rows from **API contract** through **Fulfillments**; 2 rows are **(excluded from metric)** → **50** counted units; **4** **Gap** rows remain in that set → **8%** gap rate. Those gaps: multiple shipping on one checkout, draft-order admin depth, per-warehouse stock allocation, fulfillment-line/refund depth.
+**REST** rows count toward the denominator but are scored as **REST**, not **Gap** (deliberate surface mismatch).
+
+**Current snapshot (approx.):** ~**76** counted rows; **6** rows remain **Gap** → **~8%** ecosystem gap: **CMS (pages/menus)** and **CSV jobs** in the app table, plus **multi-shipment checkout**, **draft-order admin depth**, **per-warehouse stock allocation**, and **fulfillment-line/refund depth** in the detailed sections. **Payment “App Store”** and **plugins** are scored **Partial** (compiled integrations + `apps` + webhooks), not full Saleor marketplace parity.
 
 ---
 
@@ -39,7 +42,7 @@ Saleor’s full Django/GraphQL surface (CMS, gift cards, invoices, plugin store,
 | Capability | Status | Rewrite notes |
 | --- | --- | --- |
 | OpenAPI describes HTTP routes | **Partial** | Major routes are documented (products, checkouts, orders, fulfillments, payments, channels, shipping, customers, identity, apps, webhooks, catalog attributes/types, pricing, inventory, promotions, regions, brands, translations, metadata, search). Re-audit when adding handlers; optional query/body edge cases may be lighter than implementation. |
-| Idempotency on writes | **Partial** | `Idempotency-Key` is **required** (per OpenAPI) on: `POST /products` (scope `products.upsert`), checkout `POST /checkouts/sessions`, **`PATCH /checkouts/sessions/{checkout_id}`** (`checkouts.session.patch:{checkout_id}`), **`PATCH /shop/settings`** (`shop.settings:{tenant}:{region}`), `POST .../apply-customer-addresses`, `PUT .../lines` (per line id in body), `POST .../recalculate`, `POST .../complete`, `POST /orders`, `POST /fulfillments`, `POST /customers`, `POST /customers/{id}/addresses`, and several payment mutation routes. **Not** required on many other writes (e.g. `POST /product-types`, `POST /attributes`, `PUT .../attribute-values`, variants, media, categories, collections) — clients must treat those as non-idempotent unless extended. |
+| Idempotency on writes | **Partial** | `Idempotency-Key` is **required** (per OpenAPI) on: `POST /products` (scope `products.upsert`), checkout `POST /checkouts/sessions`, **`PATCH /checkouts/sessions/{checkout_id}`** (`checkouts.session.patch:{checkout_id}`), **`PATCH /shop/settings`** (`shop.settings:{tenant}:{region}`), **`POST /gift-cards`** (`gift_cards.create`), **`POST /invoices`** (`invoices.create`), checkout **`POST .../gift-card`** (`checkouts.gift_card.apply:{checkout_id}`) and **`DELETE .../gift-card`** (`checkouts.gift_card.remove:{checkout_id}`), `POST .../apply-customer-addresses`, `PUT .../lines` (per line id in body), `POST .../recalculate`, `POST .../complete`, `POST /orders`, `POST /fulfillments`, `POST /customers`, `POST /customers/{id}/addresses`, and several payment mutation routes. **Not** required on many other writes (e.g. `POST /product-types`, `POST /attributes`, `PUT .../attribute-values`, variants, media, categories, collections) — clients must treat those as non-idempotent unless extended. |
 | GraphQL / subscriptions | **REST** | No GraphQL schema, dataloaders, or subscriptions. **Webhooks + outbox worker** approximate async/plugin patterns only where events are emitted. |
 | Error shape & codes | **Partial** | JSON error payloads with `code` / `message`; semantics and HTTP status choices may differ from Saleor’s GraphQL errors. |
 
@@ -67,13 +70,13 @@ Saleor ships many Django apps under `saleor/saleor`. The rewrite does **not** mi
 | `translations` | `localization` | **Partial** |
 | `metadata` | `metadata` | **Partial** |
 | `permission` | policy middleware, DB permissions | **Partial** |
-| `giftcard` | — | **Gap** |
-| `invoice` | — | **Gap** |
+| `giftcard` | `giftcard` | **Partial** — `GET`/`POST /gift-cards`; checkout apply/remove + balance on recalculate/complete; no full Saleor gift-card product/catalog graph. |
+| `invoice` | `invoice` | **Partial** — `GET`/`POST /invoices`, `GET /invoices/{id}`; totals from locked order row; no PDF generation pipeline. |
 | `page`, `menu` | — | **Gap** (no CMS). |
 | `site` | `shop` | **Partial** — `GET`/`PATCH /shop/settings` (tenant/region display, domain, email, address, metadata); not Saleor’s full site graph. |
-| `plugins` | — | **Gap** |
+| `plugins` | `apps`, `webhooks`, workers | **Partial** — no plugin marketplace; behavior is bespoke modules + webhooks + app registry. |
 | `csv` | — | **Gap** (no import/export jobs). |
-| `thumbnail`, `seo` | product SEO fields, media URLs only | **Gap** / **Partial** — no dedicated thumbnail/SEO subsystems. |
+| `thumbnail`, `seo` | product SEO fields, media URLs only | **Partial** — catalog SEO fields and media URLs; no Saleor-style thumbnail generation service. |
 | `schedulers` | workers (payments, webhooks) | **Partial** — not Saleor’s scheduler model. |
 
 ---
@@ -87,7 +90,7 @@ Saleor ships many Django apps under `saleor/saleor`. The rewrite does **not** mi
 | Shipping method on checkout | **Partial** | Shipping method id + country/postal on session; eligibility via `shipping_methods` rules (channels, postal prefixes, min/max order value). |
 | Stock reservation per line | **Partial** | Idempotent line upsert acquires **soft reservation** (`stock_reservations` keyed by `checkout_line_id`, TTL). Salable quantity uses `stock_items.quantity` minus other active reservations. **Complete** deducts stock, clears this checkout’s reservations, and enforces `on_hand` against other checkouts’ reservations + line demand. **No** multi-warehouse optimizer beyond `resolveStockItemID`-style resolution. |
 | Multiple shipping / split deliveries | **Gap** | Single shipping context on checkout session. |
-| Gift cards | **Gap** _(excluded from metric)_ | Not modeled in checkout, pricing, or payment totals. |
+| Gift cards | **Partial** | `POST/DELETE /checkouts/sessions/{id}/gift-card` + `Idempotency-Key`; one open checkout per card (`ux_checkout_open_unique_gift_card`); `gift_card_applied_cents` and reduced `total_cents` after tax during **recalculate** (`FOR UPDATE` on card); balance debited on **complete**; `GET/POST /gift-cards` for issuance (`gift_cards.manage`). No gift-card products or multi-code stacking like Saleor. |
 | Checkout “problems” / errors collection | **Partial** | `GET /checkouts/sessions/{checkout_id}/validation` returns codes such as `empty_cart`, `shipping_method_required`, `payment_coverage_required`, `variant_listing_mismatch`, `insufficient_stock`. Narrower than Saleor’s full `checkoutProblems` graph. |
 | Complete → order | **Partial** | Requires authorized payment coverage vs `checkout_id`, shipping when lines exist; creates order via completion path. Replay with same idempotency key returns stored order without re-emitting `order.created`. |
 | Checkout from saved addresses | **Partial** | `POST .../apply-customer-addresses` + `Idempotency-Key`, scope `checkouts.apply_customer_addresses:{checkout_id}`, advisory lock + idempotency in tx. Copies country/postal from `customer_addresses` for session `customer_id` with `FOR UPDATE` on `checkout_sessions`. |
@@ -175,7 +178,7 @@ Saleor ships many Django apps under `saleor/saleor`. The rewrite does **not** mi
 | --- | --- | --- |
 | Payment CRUD, transactions | **Partial** | Create/list/update payments; capture, refund, void; transaction history; provider webhook endpoint documented. |
 | Reconciliation worker | **Partial** | Background reconciliation in `app.go` (interval from config). |
-| Payment apps / plugins | **Gap** _(excluded from metric)_ | No Saleor App Store / plugin architecture; each integration is bespoke in code. |
+| Payment apps / plugins | **Partial** | No installable **App Store**; payments and providers are compiled services. **`apps`** + webhook outbox approximate extension points. |
 
 ---
 
@@ -219,6 +222,6 @@ Saleor ships many Django apps under `saleor/saleor`. The rewrite does **not** mi
 
 ## How to use this matrix
 
-1. Treat **Gap** rows as backlog candidates; treat **Partial** rows as “verify behavior in tests and docs before claiming parity.” Rows **(excluded from metric)** stay visible for roadmap honesty but are omitted from the scoped gap percentage.
+1. Treat **Gap** rows as backlog candidates; treat **Partial** rows as “verify behavior in tests and docs before claiming parity.”
 2. For any new HTTP surface, update **`api/openapi.yaml`** and re-check the **OpenAPI** and **Idempotency** rows.
-3. After a tranche ships, adjust the relevant rows, the **Saleor apps** summary if modules were added, the **Parity scope and gap rate** blurb if counts change, and the **_Last updated_** line at the top.
+3. After a tranche ships, adjust the relevant rows, the **Saleor apps** summary if modules were added, recompute the **full ecosystem** gap snapshot in **Parity scope and gap rate**, and the **_Last updated_** line at the top.

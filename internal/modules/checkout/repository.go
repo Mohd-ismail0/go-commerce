@@ -35,6 +35,17 @@ func checkoutPatchSessionScope(checkoutID string) string {
 	return "checkouts.session.patch:" + checkoutID
 }
 
+func checkoutGiftCardApplyScope(checkoutID string) string {
+	return "checkouts.gift_card.apply:" + checkoutID
+}
+
+func checkoutGiftCardRemoveScope(checkoutID string) string {
+	return "checkouts.gift_card.remove:" + checkoutID
+}
+
+// checkoutSessionSelectColumns is the canonical column list for full Session scans (order must match scanSessionInto).
+const checkoutSessionSelectColumns = `id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, COALESCE(gift_card_id,''), gift_card_applied_cents, updated_at`
+
 var ErrSessionNotFound = errors.New("checkout session not found")
 var ErrSessionNotOpen = errors.New("checkout session is not open")
 var ErrCheckoutEmpty = errors.New("checkout has no lines")
@@ -59,6 +70,18 @@ var ErrCheckoutRecalculateIdempotencyMismatch = errors.New("checkout recalculate
 var ErrCheckoutPatchSessionIdempotencyKeyRequired = errors.New("checkout session patch idempotency key is required")
 var ErrCheckoutPatchSessionIdempotencyOrphan = errors.New("checkout session patch idempotency references missing checkout session")
 var ErrCheckoutPatchSessionIdempotencyMismatch = errors.New("checkout session patch idempotency record mismatch")
+var ErrCheckoutGiftCardApplyIdempotencyKeyRequired = errors.New("checkout gift card apply idempotency key is required")
+var ErrCheckoutGiftCardApplyIdempotencyOrphan = errors.New("checkout gift card apply idempotency references missing checkout session")
+var ErrCheckoutGiftCardApplyIdempotencyMismatch = errors.New("checkout gift card apply idempotency record mismatch")
+var ErrCheckoutGiftCardRemoveIdempotencyKeyRequired = errors.New("checkout gift card remove idempotency key is required")
+var ErrCheckoutGiftCardRemoveIdempotencyOrphan = errors.New("checkout gift card remove idempotency references missing checkout session")
+var ErrCheckoutGiftCardRemoveIdempotencyMismatch = errors.New("checkout gift card remove idempotency record mismatch")
+var ErrGiftCardNotFound = errors.New("gift card not found")
+var ErrGiftCardInactive = errors.New("gift card is inactive")
+var ErrGiftCardExpired = errors.New("gift card has expired")
+var ErrGiftCardCurrencyMismatch = errors.New("gift card currency does not match checkout")
+var ErrGiftCardInUse = errors.New("gift card is already applied to another open checkout")
+var ErrGiftCardDepleted = errors.New("gift card balance is insufficient to complete checkout")
 
 // RecalculateOptions configures transactional checkout recalculation when a pricing engine is available.
 type RecalculateOptions struct {
@@ -82,6 +105,9 @@ type Repository interface {
 	ValidateCheckoutStock(ctx context.Context, tenantID, regionID, checkoutID string) error
 	Recalculate(ctx context.Context, tenantID, regionID, checkoutID string, opts *RecalculateOptions, idempotencyKey string) (Session, error)
 	UpdatePricing(ctx context.Context, tenantID, regionID, checkoutID string, taxCents, totalCents int64) (Session, error)
+	ValidateGiftCardForSession(ctx context.Context, tenantID, regionID string, session Session) error
+	ApplyGiftCardToCheckout(ctx context.Context, tenantID, regionID, checkoutID, code, idempotencyKey string) (Session, error)
+	RemoveGiftCardFromCheckout(ctx context.Context, tenantID, regionID, checkoutID, idempotencyKey string) (Session, error)
 	Complete(ctx context.Context, tenantID, regionID, checkoutID, idempotencyKey string) (CompleteOutcome, error)
 }
 
@@ -121,7 +147,7 @@ func (r *PostgresRepository) CreateSession(ctx context.Context, in Session, idem
 	})
 	if idemErr == nil && resourceID != "" {
 		row := tx.QueryRowContext(ctx, `
-SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+SELECT `+checkoutSessionSelectColumns+`
 FROM checkout_sessions
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 `, resourceID, in.TenantID, in.RegionID)
@@ -142,9 +168,9 @@ WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 	}
 
 	row := tx.QueryRowContext(ctx, `
-INSERT INTO checkout_sessions (id, tenant_id, region_id, customer_id, channel_id, shipping_method_id, shipping_address_country, shipping_address_postal_code, billing_address_country, billing_address_postal_code, status, currency, voucher_code, promotion_id, tax_class_id, country_code, subtotal_cents, shipping_cents, tax_cents, total_cents, created_at, updated_at)
-VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),$11,$12,NULLIF($13,''),NULLIF($14,''),NULLIF($15,''),NULLIF($16,''),0,0,0,0,NOW(),NOW())
-RETURNING id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+INSERT INTO checkout_sessions (id, tenant_id, region_id, customer_id, channel_id, shipping_method_id, shipping_address_country, shipping_address_postal_code, billing_address_country, billing_address_postal_code, status, currency, voucher_code, promotion_id, tax_class_id, country_code, subtotal_cents, shipping_cents, tax_cents, total_cents, gift_card_id, gift_card_applied_cents, created_at, updated_at)
+VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),$11,$12,NULLIF($13,''),NULLIF($14,''),NULLIF($15,''),NULLIF($16,''),0,0,0,0,NULL,0,NOW(),NOW())
+RETURNING `+checkoutSessionSelectColumns+`
 `, in.ID, in.TenantID, in.RegionID, in.CustomerID, in.ChannelID, in.ShippingMethodID, in.ShippingAddressCountry, in.ShippingAddressPostalCode, in.BillingAddressCountry, in.BillingAddressPostalCode, in.Status, in.Currency, in.VoucherCode, in.PromotionID, in.TaxClassID, in.CountryCode)
 	saved, err := scanSession(row)
 	if err != nil {
@@ -423,7 +449,7 @@ func (r *PostgresRepository) UpdateSessionContext(ctx context.Context, tenantID,
 			return Session{}, ErrCheckoutPatchSessionIdempotencyMismatch
 		}
 		row := tx.QueryRowContext(ctx, `
-SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+SELECT `+checkoutSessionSelectColumns+`
 FROM checkout_sessions
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 `, checkoutID, tenantID, regionID)
@@ -520,7 +546,7 @@ func (r *PostgresRepository) ApplyCustomerAddressesToCheckout(ctx context.Contex
 			return Session{}, ErrCheckoutApplyAddressesIdempotencyMismatch
 		}
 		row := tx.QueryRowContext(ctx, `
-SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+SELECT `+checkoutSessionSelectColumns+`
 FROM checkout_sessions
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 `, checkoutID, tenantID, regionID)
@@ -653,7 +679,7 @@ func (r *PostgresRepository) Recalculate(ctx context.Context, tenantID, regionID
 				return Session{}, ErrCheckoutRecalculateIdempotencyMismatch
 			}
 			row := tx.QueryRowContext(ctx, `
-SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+SELECT `+checkoutSessionSelectColumns+`
 FROM checkout_sessions
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 `, checkoutID, tenantID, regionID)
@@ -675,7 +701,7 @@ WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 	}
 
 	lockRow := tx.QueryRowContext(ctx, `
-SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+SELECT `+checkoutSessionSelectColumns+`
 FROM checkout_sessions
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND status = 'open'
 FOR UPDATE
@@ -709,12 +735,23 @@ WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND status = 'open'
 
 	if opts == nil || opts.ComputePricing == nil {
 		row := tx.QueryRowContext(ctx, `
-SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+SELECT `+checkoutSessionSelectColumns+`
 FROM checkout_sessions
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 `, checkoutID, tenantID, regionID)
 		var out Session
 		if err := scanSessionInto(row, &out); err != nil {
+			return Session{}, err
+		}
+		if err := finalizeGiftCardTotalsCheckoutTx(ctx, tx, tenantID, regionID, checkoutID, out.TotalCents, out.Currency, locked.GiftCardID); err != nil {
+			return Session{}, err
+		}
+		rowFin := tx.QueryRowContext(ctx, `
+SELECT `+checkoutSessionSelectColumns+`
+FROM checkout_sessions
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+`, checkoutID, tenantID, regionID)
+		if err := scanSessionInto(rowFin, &out); err != nil {
 			return Session{}, err
 		}
 		if key != "" {
@@ -734,7 +771,7 @@ WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 	}
 
 	row := tx.QueryRowContext(ctx, `
-SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+SELECT `+checkoutSessionSelectColumns+`
 FROM checkout_sessions
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 `, checkoutID, tenantID, regionID)
@@ -771,7 +808,7 @@ WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND status = 'open'
 	}
 
 	row2 := tx.QueryRowContext(ctx, `
-SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+SELECT `+checkoutSessionSelectColumns+`
 FROM checkout_sessions
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 `, checkoutID, tenantID, regionID)
@@ -794,12 +831,24 @@ WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND status = 'open'
 	}
 
 	row3 := tx.QueryRowContext(ctx, `
-SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+SELECT `+checkoutSessionSelectColumns+`
 FROM checkout_sessions
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 `, checkoutID, tenantID, regionID)
 	var out Session
 	if err := scanSessionInto(row3, &out); err != nil {
+		return Session{}, err
+	}
+	if err := finalizeGiftCardTotalsCheckoutTx(ctx, tx, tenantID, regionID, checkoutID, out.TotalCents, out.Currency, locked.GiftCardID); err != nil {
+		return Session{}, err
+	}
+	row4 := tx.QueryRowContext(ctx, `
+SELECT `+checkoutSessionSelectColumns+`
+FROM checkout_sessions
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+`, checkoutID, tenantID, regionID)
+	var final Session
+	if err := scanSessionInto(row4, &final); err != nil {
 		return Session{}, err
 	}
 	if key != "" {
@@ -815,7 +864,7 @@ WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 	if err := tx.Commit(); err != nil {
 		return Session{}, err
 	}
-	return out, nil
+	return final, nil
 }
 
 func (r *PostgresRepository) ResolveShippingMethodPrice(ctx context.Context, tenantID, regionID, shippingMethodID, countryCode, channelID, postalCode, currency string, subtotalCents int64) (int64, bool, error) {
@@ -924,6 +973,303 @@ WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 	return r.getSession(ctx, tenantID, regionID, checkoutID)
 }
 
+func finalizeGiftCardTotalsCheckoutTx(ctx context.Context, tx *sql.Tx, tenantID, regionID, checkoutID string, preGiftTotalCents int64, sessionCurrency, giftCardID string) error {
+	gcID := strings.TrimSpace(giftCardID)
+	if gcID == "" {
+		_, err := tx.ExecContext(ctx, `
+UPDATE checkout_sessions SET gift_card_applied_cents = 0, updated_at = NOW()
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND status = 'open'
+`, checkoutID, tenantID, regionID)
+		return err
+	}
+	var bal int64
+	var active bool
+	var gcCur string
+	var exp sql.NullTime
+	err := tx.QueryRowContext(ctx, `
+SELECT balance_cents, is_active, currency, expires_at
+FROM gift_cards
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+FOR UPDATE
+`, gcID, tenantID, regionID).Scan(&bal, &active, &gcCur, &exp)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrGiftCardNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if !active {
+		return ErrGiftCardInactive
+	}
+	if exp.Valid && time.Now().UTC().After(exp.Time.UTC()) {
+		return ErrGiftCardExpired
+	}
+	if !strings.EqualFold(strings.TrimSpace(gcCur), strings.TrimSpace(sessionCurrency)) {
+		return ErrGiftCardCurrencyMismatch
+	}
+	preGift := preGiftTotalCents
+	if preGift < 0 {
+		preGift = 0
+	}
+	applied := preGift
+	if bal < applied {
+		applied = bal
+	}
+	newTotal := preGift - applied
+	if newTotal < 0 {
+		newTotal = 0
+	}
+	_, err = tx.ExecContext(ctx, `
+UPDATE checkout_sessions
+SET gift_card_applied_cents = $4, total_cents = $5, updated_at = NOW()
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND status = 'open'
+`, checkoutID, tenantID, regionID, applied, newTotal)
+	return err
+}
+
+func (r *PostgresRepository) ValidateGiftCardForSession(ctx context.Context, tenantID, regionID string, session Session) error {
+	gcID := strings.TrimSpace(session.GiftCardID)
+	if gcID == "" {
+		return nil
+	}
+	var bal int64
+	var active bool
+	var gcCur string
+	var exp sql.NullTime
+	err := r.db.QueryRowContext(ctx, `
+SELECT balance_cents, is_active, currency, expires_at
+FROM gift_cards
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+`, gcID, tenantID, regionID).Scan(&bal, &active, &gcCur, &exp)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrGiftCardNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if !active {
+		return ErrGiftCardInactive
+	}
+	if exp.Valid && time.Now().UTC().After(exp.Time.UTC()) {
+		return ErrGiftCardExpired
+	}
+	if !strings.EqualFold(strings.TrimSpace(gcCur), strings.TrimSpace(session.Currency)) {
+		return ErrGiftCardCurrencyMismatch
+	}
+	if bal <= 0 {
+		return ErrGiftCardDepleted
+	}
+	return nil
+}
+
+func (r *PostgresRepository) ApplyGiftCardToCheckout(ctx context.Context, tenantID, regionID, checkoutID, code, idempotencyKey string) (Session, error) {
+	checkoutID = strings.TrimSpace(checkoutID)
+	key := strings.TrimSpace(idempotencyKey)
+	if key == "" {
+		return Session{}, ErrCheckoutGiftCardApplyIdempotencyKeyRequired
+	}
+	normalized := strings.ToUpper(strings.TrimSpace(code))
+	if normalized == "" {
+		return Session{}, ErrGiftCardNotFound
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Session{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	lockKey := tenantID + "\x00" + checkoutGiftCardApplyScope(checkoutID) + "\x00" + key
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1::text))`, lockKey); err != nil {
+		return Session{}, err
+	}
+	qtx := r.queries.WithTx(tx)
+	scope := checkoutGiftCardApplyScope(checkoutID)
+	resourceID, idemErr := qtx.GetIdempotencyResource(ctx, dbsqlc.GetIdempotencyResourceParams{
+		TenantID:       tenantID,
+		Scope:          scope,
+		IdempotencyKey: key,
+	})
+	if idemErr == nil && resourceID != "" {
+		if resourceID != checkoutID {
+			return Session{}, ErrCheckoutGiftCardApplyIdempotencyMismatch
+		}
+		row := tx.QueryRowContext(ctx, `SELECT `+checkoutSessionSelectColumns+`
+FROM checkout_sessions
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+`, checkoutID, tenantID, regionID)
+		out, scanErr := scanSession(row)
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			return Session{}, fmt.Errorf("%w: %q", ErrCheckoutGiftCardApplyIdempotencyOrphan, checkoutID)
+		}
+		if scanErr != nil {
+			return Session{}, scanErr
+		}
+		if err := tx.Commit(); err != nil {
+			return Session{}, err
+		}
+		return out, nil
+	}
+	if idemErr != nil && !errors.Is(idemErr, sql.ErrNoRows) {
+		return Session{}, idemErr
+	}
+
+	row := tx.QueryRowContext(ctx, `SELECT `+checkoutSessionSelectColumns+`
+FROM checkout_sessions
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND status = 'open'
+FOR UPDATE
+`, checkoutID, tenantID, regionID)
+	var sess Session
+	if err := scanSessionInto(row, &sess); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Session{}, ErrSessionNotFound
+		}
+		return Session{}, err
+	}
+
+	var cardID string
+	var bal int64
+	var active bool
+	var gcCur string
+	var exp sql.NullTime
+	err = tx.QueryRowContext(ctx, `
+SELECT id, balance_cents, is_active, currency, expires_at
+FROM gift_cards
+WHERE tenant_id = $1 AND region_id = $2 AND code = $3
+FOR UPDATE
+`, tenantID, regionID, normalized).Scan(&cardID, &bal, &active, &gcCur, &exp)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Session{}, ErrGiftCardNotFound
+	}
+	if err != nil {
+		return Session{}, err
+	}
+	if !active {
+		return Session{}, ErrGiftCardInactive
+	}
+	if exp.Valid && time.Now().UTC().After(exp.Time.UTC()) {
+		return Session{}, ErrGiftCardExpired
+	}
+	if bal <= 0 {
+		return Session{}, ErrGiftCardDepleted
+	}
+	if !strings.EqualFold(strings.TrimSpace(gcCur), strings.TrimSpace(sess.Currency)) {
+		return Session{}, ErrGiftCardCurrencyMismatch
+	}
+
+	var otherID string
+	oerr := tx.QueryRowContext(ctx, `
+SELECT id FROM checkout_sessions
+WHERE gift_card_id = $1 AND status = 'open' AND id <> $2 AND tenant_id = $3 AND region_id = $4
+LIMIT 1
+`, cardID, checkoutID, tenantID, regionID).Scan(&otherID)
+	if oerr == nil {
+		return Session{}, ErrGiftCardInUse
+	}
+	if oerr != nil && !errors.Is(oerr, sql.ErrNoRows) {
+		return Session{}, oerr
+	}
+
+	if _, err = tx.ExecContext(ctx, `
+UPDATE checkout_sessions
+SET gift_card_id = $4, updated_at = NOW()
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND status = 'open'
+`, checkoutID, tenantID, regionID, cardID); err != nil {
+		return Session{}, err
+	}
+
+	if err := qtx.SaveIdempotencyResource(ctx, dbsqlc.SaveIdempotencyResourceParams{
+		TenantID:       tenantID,
+		Scope:          scope,
+		IdempotencyKey: key,
+		ResourceID:     checkoutID,
+	}); err != nil {
+		return Session{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Session{}, err
+	}
+	return r.getSession(ctx, tenantID, regionID, checkoutID)
+}
+
+func (r *PostgresRepository) RemoveGiftCardFromCheckout(ctx context.Context, tenantID, regionID, checkoutID, idempotencyKey string) (Session, error) {
+	checkoutID = strings.TrimSpace(checkoutID)
+	key := strings.TrimSpace(idempotencyKey)
+	if key == "" {
+		return Session{}, ErrCheckoutGiftCardRemoveIdempotencyKeyRequired
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Session{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	lockKey := tenantID + "\x00" + checkoutGiftCardRemoveScope(checkoutID) + "\x00" + key
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1::text))`, lockKey); err != nil {
+		return Session{}, err
+	}
+	qtx := r.queries.WithTx(tx)
+	scope := checkoutGiftCardRemoveScope(checkoutID)
+	resourceID, idemErr := qtx.GetIdempotencyResource(ctx, dbsqlc.GetIdempotencyResourceParams{
+		TenantID:       tenantID,
+		Scope:          scope,
+		IdempotencyKey: key,
+	})
+	if idemErr == nil && resourceID != "" {
+		if resourceID != checkoutID {
+			return Session{}, ErrCheckoutGiftCardRemoveIdempotencyMismatch
+		}
+		row := tx.QueryRowContext(ctx, `SELECT `+checkoutSessionSelectColumns+`
+FROM checkout_sessions
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+`, checkoutID, tenantID, regionID)
+		out, scanErr := scanSession(row)
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			return Session{}, fmt.Errorf("%w: %q", ErrCheckoutGiftCardRemoveIdempotencyOrphan, checkoutID)
+		}
+		if scanErr != nil {
+			return Session{}, scanErr
+		}
+		if err := tx.Commit(); err != nil {
+			return Session{}, err
+		}
+		return out, nil
+	}
+	if idemErr != nil && !errors.Is(idemErr, sql.ErrNoRows) {
+		return Session{}, idemErr
+	}
+	res, err := tx.ExecContext(ctx, `
+UPDATE checkout_sessions
+SET gift_card_id = NULL, gift_card_applied_cents = 0, updated_at = NOW()
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND status = 'open'
+`, checkoutID, tenantID, regionID)
+	if err != nil {
+		return Session{}, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		var st string
+		serr := tx.QueryRowContext(ctx, `SELECT status FROM checkout_sessions WHERE id = $1 AND tenant_id = $2 AND region_id = $3`, checkoutID, tenantID, regionID).Scan(&st)
+		if errors.Is(serr, sql.ErrNoRows) {
+			return Session{}, ErrSessionNotFound
+		}
+		if serr != nil {
+			return Session{}, serr
+		}
+		return Session{}, ErrSessionNotOpen
+	}
+	if err := qtx.SaveIdempotencyResource(ctx, dbsqlc.SaveIdempotencyResourceParams{
+		TenantID:       tenantID,
+		Scope:          scope,
+		IdempotencyKey: key,
+		ResourceID:     checkoutID,
+	}); err != nil {
+		return Session{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Session{}, err
+	}
+	return r.getSession(ctx, tenantID, regionID, checkoutID)
+}
+
 func (r *PostgresRepository) HasAuthorizedPaymentCoverage(ctx context.Context, tenantID, regionID, checkoutID string, requiredTotalCents int64) (bool, error) {
 	var covered int64
 	err := r.db.QueryRowContext(ctx, `
@@ -937,7 +1283,10 @@ WHERE tenant_id = $1
 	if err != nil {
 		return false, err
 	}
-	return covered >= requiredTotalCents && requiredTotalCents > 0, nil
+	if requiredTotalCents <= 0 {
+		return true, nil
+	}
+	return covered >= requiredTotalCents, nil
 }
 
 func (r *PostgresRepository) UpdatePricing(ctx context.Context, tenantID, regionID, checkoutID string, taxCents, totalCents int64) (Session, error) {
@@ -1112,7 +1461,7 @@ WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND checkout_id = $4
 
 	var session Session
 	row := tx.QueryRowContext(ctx, `
-SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+SELECT `+checkoutSessionSelectColumns+`
 FROM checkout_sessions
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 FOR UPDATE
@@ -1252,6 +1601,24 @@ RETURNING id
 				return CompleteOutcome{}, ErrVoucherUnavailable
 			}
 			return CompleteOutcome{}, scanErr
+		}
+	}
+
+	if strings.TrimSpace(session.GiftCardID) != "" && session.GiftCardAppliedCents > 0 {
+		res, gerr := tx.ExecContext(ctx, `
+UPDATE gift_cards
+SET balance_cents = balance_cents - $4, updated_at = NOW()
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND balance_cents >= $4
+`, session.GiftCardID, tenantID, regionID, session.GiftCardAppliedCents)
+		if gerr != nil {
+			return CompleteOutcome{}, gerr
+		}
+		n, raErr := res.RowsAffected()
+		if raErr != nil {
+			return CompleteOutcome{}, raErr
+		}
+		if n == 0 {
+			return CompleteOutcome{}, ErrGiftCardDepleted
 		}
 	}
 
@@ -1499,7 +1866,7 @@ WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 
 func (r *PostgresRepository) getSession(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error) {
 	row := r.db.QueryRowContext(ctx, `
-SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+SELECT `+checkoutSessionSelectColumns+`
 FROM checkout_sessions
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 `, checkoutID, tenantID, regionID)
@@ -1543,6 +1910,8 @@ func scanSessionInto(row scanner, out *Session) error {
 		&out.ShippingCents,
 		&out.TaxCents,
 		&out.TotalCents,
+		&out.GiftCardID,
+		&out.GiftCardAppliedCents,
 		&updatedAt,
 	); err != nil {
 		return err

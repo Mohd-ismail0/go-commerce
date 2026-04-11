@@ -314,6 +314,35 @@ func (f *fakeRepo) ValidateCheckoutStock(context.Context, string, string, string
 	return nil
 }
 
+func (f *fakeRepo) ValidateGiftCardForSession(context.Context, string, string, Session) error {
+	return nil
+}
+
+func (f *fakeRepo) ApplyGiftCardToCheckout(ctx context.Context, _, _, checkoutID, code, idempotencyKey string) (Session, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return Session{}, ErrCheckoutGiftCardApplyIdempotencyKeyRequired
+	}
+	s, err := f.GetSession(ctx, "", "", checkoutID)
+	if err != nil {
+		return Session{}, err
+	}
+	s.GiftCardID = "gc_" + strings.TrimSpace(code)
+	return s, nil
+}
+
+func (f *fakeRepo) RemoveGiftCardFromCheckout(ctx context.Context, _, _, checkoutID, idempotencyKey string) (Session, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return Session{}, ErrCheckoutGiftCardRemoveIdempotencyKeyRequired
+	}
+	s, err := f.GetSession(ctx, "", "", checkoutID)
+	if err != nil {
+		return Session{}, err
+	}
+	s.GiftCardID = ""
+	s.GiftCardAppliedCents = 0
+	return s, nil
+}
+
 func (f *fakeRepo) Complete(_ context.Context, tenantID, regionID, checkoutID, idempotencyKey string) (CompleteOutcome, error) {
 	key := strings.TrimSpace(idempotencyKey)
 	if key == "" {
