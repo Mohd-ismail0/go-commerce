@@ -1183,9 +1183,14 @@ paths:
     post:
       operationId: post_checkouts_sessions_by_checkout_id_complete
       summary: Complete checkout into order
+      description: |
+        Idempotent by `Idempotency-Key` per tenant; scope `checkouts.complete:{checkout_id}`. Retries return the same
+        order (`201`, same `order_id`) without emitting `order.created` again. Uses `pg_advisory_xact_lock` in the
+        same database transaction as stock deduction, order insert, and checkout status update.
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
+        - $ref: "#/components/parameters/IdempotencyHeader"
         - in: path
           name: checkout_id
           required: true

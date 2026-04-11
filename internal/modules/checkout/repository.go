@@ -15,6 +15,10 @@ import (
 
 const checkoutSessionCreateScope = "checkouts.sessions.create"
 
+func checkoutCompleteScope(checkoutID string) string {
+	return "checkouts.complete:" + checkoutID
+}
+
 var ErrSessionNotFound = errors.New("checkout session not found")
 var ErrSessionNotOpen = errors.New("checkout session is not open")
 var ErrCheckoutEmpty = errors.New("checkout has no lines")
@@ -26,6 +30,8 @@ var ErrShippingMethodNotEligible = errors.New("selected shipping method is not e
 var ErrCustomerAddressNotApplicable = errors.New("customer address not found or does not belong to this checkout customer")
 var ErrIdempotencyKeyRequired = errors.New("checkout idempotency key is required")
 var ErrCheckoutIdempotencyOrphan = errors.New("idempotency record references missing checkout session")
+var ErrCheckoutCompleteIdempotencyKeyRequired = errors.New("checkout completion idempotency key is required")
+var ErrCheckoutCompleteIdempotencyOrphan = errors.New("checkout completion idempotency references missing order")
 
 // RecalculateOptions configures transactional checkout recalculation when a pricing engine is available.
 type RecalculateOptions struct {
@@ -48,7 +54,7 @@ type Repository interface {
 	HasAuthorizedPaymentCoverage(ctx context.Context, tenantID, regionID, checkoutID string, requiredTotalCents int64) (bool, error)
 	Recalculate(ctx context.Context, tenantID, regionID, checkoutID string, opts *RecalculateOptions) (Session, error)
 	UpdatePricing(ctx context.Context, tenantID, regionID, checkoutID string, taxCents, totalCents int64) (Session, error)
-	Complete(ctx context.Context, tenantID, regionID, checkoutID, orderID string) (OrderCreatedPayload, error)
+	Complete(ctx context.Context, tenantID, regionID, checkoutID, idempotencyKey string) (CompleteOutcome, error)
 }
 
 type PostgresRepository struct {
@@ -797,14 +803,55 @@ WHERE tenant_id = $1 AND region_id = $2 AND id = $3
 	return productID, true, nil
 }
 
-func (r *PostgresRepository) Complete(ctx context.Context, tenantID, regionID, checkoutID, orderID string) (OrderCreatedPayload, error) {
+func (r *PostgresRepository) Complete(ctx context.Context, tenantID, regionID, checkoutID, idempotencyKey string) (CompleteOutcome, error) {
+	checkoutID = strings.TrimSpace(checkoutID)
+	key := strings.TrimSpace(idempotencyKey)
+	if key == "" {
+		return CompleteOutcome{}, ErrCheckoutCompleteIdempotencyKeyRequired
+	}
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return OrderCreatedPayload{}, err
+		return CompleteOutcome{}, err
 	}
 	defer func() {
 		_ = tx.Rollback()
 	}()
+
+	lockKey := tenantID + "\x00" + checkoutCompleteScope(checkoutID) + "\x00" + key
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1::text))`, lockKey); err != nil {
+		return CompleteOutcome{}, err
+	}
+	qtx := r.queries.WithTx(tx)
+	scope := checkoutCompleteScope(checkoutID)
+	resourceID, idemErr := qtx.GetIdempotencyResource(ctx, dbsqlc.GetIdempotencyResourceParams{
+		TenantID:       tenantID,
+		Scope:          scope,
+		IdempotencyKey: key,
+	})
+	if idemErr == nil && resourceID != "" {
+		row := tx.QueryRowContext(ctx, `
+SELECT id, tenant_id, region_id, customer_id, status, total_cents, currency, COALESCE(checkout_id, '')
+FROM orders
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND checkout_id = $4
+`, resourceID, tenantID, regionID, checkoutID)
+		var p OrderCreatedPayload
+		if scanErr := row.Scan(&p.ID, &p.TenantID, &p.RegionID, &p.CustomerID, &p.Status, &p.TotalCents, &p.Currency, &p.CheckoutID); scanErr != nil {
+			if errors.Is(scanErr, sql.ErrNoRows) {
+				return CompleteOutcome{}, fmt.Errorf("%w: %q", ErrCheckoutCompleteIdempotencyOrphan, resourceID)
+			}
+			return CompleteOutcome{}, scanErr
+		}
+		if err := tx.Commit(); err != nil {
+			return CompleteOutcome{}, err
+		}
+		return CompleteOutcome{Payload: p, FromIdempotencyReplay: true}, nil
+	}
+	if idemErr != nil && !errors.Is(idemErr, sql.ErrNoRows) {
+		return CompleteOutcome{}, idemErr
+	}
+
+	orderID := utils.NewID("ord")
 
 	var session Session
 	row := tx.QueryRowContext(ctx, `
@@ -815,12 +862,12 @@ FOR UPDATE
 `, checkoutID, tenantID, regionID)
 	if scanErr := scanSessionInto(row, &session); scanErr != nil {
 		if errors.Is(scanErr, sql.ErrNoRows) {
-			return OrderCreatedPayload{}, ErrSessionNotFound
+			return CompleteOutcome{}, ErrSessionNotFound
 		}
-		return OrderCreatedPayload{}, scanErr
+		return CompleteOutcome{}, scanErr
 	}
 	if session.Status != "open" {
-		return OrderCreatedPayload{}, ErrSessionNotOpen
+		return CompleteOutcome{}, ErrSessionNotOpen
 	}
 
 	lines, err := tx.QueryContext(ctx, `
@@ -829,7 +876,7 @@ FROM checkout_lines
 WHERE checkout_id = $1 AND tenant_id = $2 AND region_id = $3
 `, checkoutID, tenantID, regionID)
 	if err != nil {
-		return OrderCreatedPayload{}, err
+		return CompleteOutcome{}, err
 	}
 	defer func() {
 		_ = lines.Close()
@@ -838,31 +885,31 @@ WHERE checkout_id = $1 AND tenant_id = $2 AND region_id = $3
 	for lines.Next() {
 		var l Line
 		if err = lines.Scan(&l.ID, &l.CheckoutID, &l.ProductID, &l.VariantID, &l.Quantity, &l.UnitPriceCents, &l.Currency); err != nil {
-			return OrderCreatedPayload{}, err
+			return CompleteOutcome{}, err
 		}
 		collected = append(collected, l)
 	}
 	if len(collected) == 0 {
-		return OrderCreatedPayload{}, ErrCheckoutEmpty
+		return CompleteOutcome{}, ErrCheckoutEmpty
 	}
 	if err = lines.Err(); err != nil {
-		return OrderCreatedPayload{}, err
+		return CompleteOutcome{}, err
 	}
 	if strings.TrimSpace(session.ChannelID) != "" {
 		active, activeErr := channelIsActiveTx(ctx, tx, tenantID, regionID, session.ChannelID)
 		if activeErr != nil {
-			return OrderCreatedPayload{}, activeErr
+			return CompleteOutcome{}, activeErr
 		}
 		if !active {
-			return OrderCreatedPayload{}, ErrChannelListingMismatch
+			return CompleteOutcome{}, ErrChannelListingMismatch
 		}
 		for _, l := range collected {
 			ok, validateErr := lineMatchesChannelListingTx(ctx, tx, tenantID, regionID, session.ChannelID, l)
 			if validateErr != nil {
-				return OrderCreatedPayload{}, validateErr
+				return CompleteOutcome{}, validateErr
 			}
 			if !ok {
-				return OrderCreatedPayload{}, ErrChannelListingMismatch
+				return CompleteOutcome{}, ErrChannelListingMismatch
 			}
 		}
 	}
@@ -872,7 +919,7 @@ WHERE checkout_id = $1 AND tenant_id = $2 AND region_id = $3
 	for _, l := range collected {
 		stockItemID, resolveErr := resolveStockItemID(ctx, tx, tenantID, regionID, l)
 		if resolveErr != nil {
-			return OrderCreatedPayload{}, resolveErr
+			return CompleteOutcome{}, resolveErr
 		}
 		requiredByStockItem[stockItemID] += l.Quantity
 	}
@@ -886,9 +933,9 @@ FOR UPDATE
 `, tenantID, regionID, stockItemID)
 		if scanErr := row.Scan(&onHand); scanErr != nil {
 			if errors.Is(scanErr, sql.ErrNoRows) {
-				return OrderCreatedPayload{}, ErrInsufficientStock
+				return CompleteOutcome{}, ErrInsufficientStock
 			}
-			return OrderCreatedPayload{}, scanErr
+			return CompleteOutcome{}, scanErr
 		}
 		var othersReserved int64
 		if scanErr := tx.QueryRowContext(ctx, `
@@ -898,29 +945,29 @@ WHERE tenant_id = $1 AND region_id = $2 AND stock_item_id = $3
   AND checkout_id <> $4
   AND expires_at > NOW()
 `, tenantID, regionID, stockItemID, checkoutID).Scan(&othersReserved); scanErr != nil {
-			return OrderCreatedPayload{}, scanErr
+			return CompleteOutcome{}, scanErr
 		}
 		if onHand < othersReserved+required {
-			return OrderCreatedPayload{}, ErrInsufficientStock
+			return CompleteOutcome{}, ErrInsufficientStock
 		}
 		if _, err = tx.ExecContext(ctx, `
 UPDATE stock_items
 SET quantity = quantity - $4, updated_at = NOW()
 WHERE tenant_id = $1 AND region_id = $2 AND id = $3
 `, tenantID, regionID, stockItemID, required); err != nil {
-			return OrderCreatedPayload{}, err
+			return CompleteOutcome{}, err
 		}
 		if _, err = tx.ExecContext(ctx, `
 DELETE FROM stock_reservations
 WHERE tenant_id = $1 AND region_id = $2 AND checkout_id = $3 AND stock_item_id = $4
 `, tenantID, regionID, checkoutID, stockItemID); err != nil {
-			return OrderCreatedPayload{}, err
+			return CompleteOutcome{}, err
 		}
 		if _, err = tx.ExecContext(ctx, `
 INSERT INTO stock_allocations (id, tenant_id, region_id, order_id, checkout_id, stock_item_id, quantity, created_at, updated_at)
 VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),NOW())
 `, utils.NewID("alc"), tenantID, regionID, orderID, checkoutID, stockItemID, required); err != nil {
-			return OrderCreatedPayload{}, err
+			return CompleteOutcome{}, err
 		}
 	}
 
@@ -945,9 +992,9 @@ RETURNING id
 		var voucherID string
 		if scanErr := consumeVoucher.Scan(&voucherID); scanErr != nil {
 			if errors.Is(scanErr, sql.ErrNoRows) {
-				return OrderCreatedPayload{}, ErrVoucherUnavailable
+				return CompleteOutcome{}, ErrVoucherUnavailable
 			}
-			return OrderCreatedPayload{}, scanErr
+			return CompleteOutcome{}, scanErr
 		}
 	}
 
@@ -955,14 +1002,14 @@ RETURNING id
 INSERT INTO orders (id, tenant_id, region_id, customer_id, status, total_cents, currency, checkout_id, created_at, updated_at)
 VALUES ($1,$2,$3,$4,'created',$5,$6,$7,NOW(),NOW())
 `, orderID, tenantID, regionID, session.CustomerID, session.TotalCents, session.Currency, session.ID); err != nil {
-		return OrderCreatedPayload{}, err
+		return CompleteOutcome{}, err
 	}
 	for _, l := range collected {
 		if _, err = tx.ExecContext(ctx, `
 INSERT INTO order_lines (id, tenant_id, region_id, order_id, product_id, variant_id, quantity, unit_price_cents, total_cents, currency, created_at, updated_at)
 VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),$7,$8,$9,$10,NOW(),NOW())
 `, "ol_"+l.ID, tenantID, regionID, orderID, l.ProductID, l.VariantID, l.Quantity, l.UnitPriceCents, l.Quantity*l.UnitPriceCents, l.Currency); err != nil {
-			return OrderCreatedPayload{}, err
+			return CompleteOutcome{}, err
 		}
 	}
 	if _, err = tx.ExecContext(ctx, `
@@ -974,26 +1021,37 @@ WHERE tenant_id = $1
   AND checkout_id = $3
   AND status IN ('authorized', 'partially_captured', 'captured')
 `, tenantID, regionID, checkoutID, orderID); err != nil {
-		return OrderCreatedPayload{}, err
+		return CompleteOutcome{}, err
 	}
 	if _, err = tx.ExecContext(ctx, `
 UPDATE checkout_sessions SET status = 'completed', updated_at = NOW()
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 `, checkoutID, tenantID, regionID); err != nil {
-		return OrderCreatedPayload{}, err
+		return CompleteOutcome{}, err
+	}
+	if err := qtx.SaveIdempotencyResource(ctx, dbsqlc.SaveIdempotencyResourceParams{
+		TenantID:       tenantID,
+		Scope:          scope,
+		IdempotencyKey: key,
+		ResourceID:     orderID,
+	}); err != nil {
+		return CompleteOutcome{}, err
 	}
 	if err = tx.Commit(); err != nil {
-		return OrderCreatedPayload{}, err
+		return CompleteOutcome{}, err
 	}
-	return OrderCreatedPayload{
-		ID:         orderID,
-		TenantID:   tenantID,
-		RegionID:   regionID,
-		CustomerID: session.CustomerID,
-		Status:     "created",
-		TotalCents: session.TotalCents,
-		Currency:   session.Currency,
-		CheckoutID: session.ID,
+	return CompleteOutcome{
+		Payload: OrderCreatedPayload{
+			ID:         orderID,
+			TenantID:   tenantID,
+			RegionID:   regionID,
+			CustomerID: session.CustomerID,
+			Status:     "created",
+			TotalCents: session.TotalCents,
+			Currency:   session.Currency,
+			CheckoutID: session.ID,
+		},
+		FromIdempotencyReplay: false,
 	}, nil
 }
 

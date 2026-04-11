@@ -12,18 +12,19 @@ import (
 )
 
 type fakeRepo struct {
-	completed         bool
-	session           Session
-	completeErr       error
-	lines             []Line
-	paymentCovered    bool
-	upsertErr         error
-	updateCtxErr      error
-	updateShippingErr error
-	updatePricingErr  error
-	applyAddrErr      error
-	getSessionErr     error
-	idem              map[string]Session
+	completed             bool
+	session               Session
+	completeErr           error
+	lines                 []Line
+	paymentCovered        bool
+	upsertErr             error
+	updateCtxErr          error
+	updateShippingErr     error
+	updatePricingErr      error
+	applyAddrErr          error
+	getSessionErr         error
+	idem                  map[string]Session
+	completePayloadByIdem map[string]OrderCreatedPayload
 }
 
 func (f *fakeRepo) CreateSession(_ context.Context, in Session, idempotencyKey string) (Session, error) {
@@ -246,13 +247,24 @@ func (f *fakeRepo) HasAuthorizedPaymentCoverage(_ context.Context, _, _, _ strin
 	return f.paymentCovered, nil
 }
 
-func (f *fakeRepo) Complete(_ context.Context, tenantID, regionID, checkoutID, orderID string) (OrderCreatedPayload, error) {
+func (f *fakeRepo) Complete(_ context.Context, tenantID, regionID, checkoutID, idempotencyKey string) (CompleteOutcome, error) {
+	key := strings.TrimSpace(idempotencyKey)
+	if key == "" {
+		return CompleteOutcome{}, ErrCheckoutCompleteIdempotencyKeyRequired
+	}
+	sk := tenantID + "|" + checkoutCompleteScope(checkoutID) + "|" + key
+	if f.completePayloadByIdem == nil {
+		f.completePayloadByIdem = make(map[string]OrderCreatedPayload)
+	}
+	if prev, ok := f.completePayloadByIdem[sk]; ok {
+		return CompleteOutcome{Payload: prev, FromIdempotencyReplay: true}, nil
+	}
 	if f.completeErr != nil {
-		return OrderCreatedPayload{}, f.completeErr
+		return CompleteOutcome{}, f.completeErr
 	}
 	f.completed = true
-	return OrderCreatedPayload{
-		ID:         orderID,
+	payload := OrderCreatedPayload{
+		ID:         "ord_test_1",
 		TenantID:   tenantID,
 		RegionID:   regionID,
 		CheckoutID: checkoutID,
@@ -260,13 +272,15 @@ func (f *fakeRepo) Complete(_ context.Context, tenantID, regionID, checkoutID, o
 		Status:     "created",
 		TotalCents: 1200,
 		Currency:   "USD",
-	}, nil
+	}
+	f.completePayloadByIdem[sk] = payload
+	return CompleteOutcome{Payload: payload, FromIdempotencyReplay: false}, nil
 }
 
 func TestCompleteMapsChannelListingMismatchToConflict(t *testing.T) {
 	repo := &fakeRepo{completeErr: ErrChannelListingMismatch, paymentCovered: true}
 	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
-	_, err := svc.Complete(context.Background(), "tenant_a", "us", "chk_1")
+	_, err := svc.Complete(context.Background(), "tenant_a", "us", "chk_1", "idem-c")
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -302,7 +316,7 @@ func TestCompletePublishesOrderCreatedAndReturnsOrderID(t *testing.T) {
 		done <- struct{}{}
 	})
 	svc := NewService(repo, bus, &fakeCalculator{})
-	result, err := svc.Complete(context.Background(), "tenant_a", "us", "chk_1")
+	result, err := svc.Complete(context.Background(), "tenant_a", "us", "chk_1", "idem-c")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -334,7 +348,7 @@ func TestCompleteRequiresAuthorizedPaymentCoverage(t *testing.T) {
 		},
 	}
 	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
-	_, err := svc.Complete(context.Background(), "tenant_a", "us", "chk_1")
+	_, err := svc.Complete(context.Background(), "tenant_a", "us", "chk_1", "idem-c")
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -357,13 +371,68 @@ func TestCompleteRequiresShippingContextWhenCheckoutHasLines(t *testing.T) {
 		},
 	}
 	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
-	_, err := svc.Complete(context.Background(), "tenant_a", "us", "chk_1")
+	_, err := svc.Complete(context.Background(), "tenant_a", "us", "chk_1", "idem-c")
 	if err == nil {
 		t.Fatalf("expected error")
 	}
 	apiErr, ok := err.(sharederrors.APIError)
 	if !ok || apiErr.Status != 409 {
 		t.Fatalf("expected 409 API error, got %#v", err)
+	}
+}
+
+func TestCompleteRequiresIdempotencyKey(t *testing.T) {
+	svc := NewService(&fakeRepo{paymentCovered: true}, events.NewBus(), &fakeCalculator{})
+	_, err := svc.Complete(context.Background(), "t", "r", "chk_1", "  ")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	apiErr, ok := err.(sharederrors.APIError)
+	if !ok || apiErr.Status != 400 {
+		t.Fatalf("expected 400 API error, got %#v", err)
+	}
+}
+
+func TestCompleteIdempotentReplayDoesNotRepublishOrderCreated(t *testing.T) {
+	repo := &fakeRepo{
+		paymentCovered: true,
+		session: Session{
+			ID:                     "chk_1",
+			Status:                 "open",
+			Currency:               "USD",
+			ShippingMethodID:       "ship_std",
+			ShippingAddressCountry: "US",
+		},
+		lines: []Line{
+			{ID: "ln_1", CheckoutID: "chk_1", ProductID: "prd_ok", Quantity: 1, UnitPriceCents: 1000, Currency: "USD"},
+		},
+	}
+	bus := events.NewBus()
+	var publishCount int
+	published := make(chan struct{}, 8)
+	bus.Subscribe(events.EventOrderCreated, func(_ context.Context, _ any) {
+		publishCount++
+		published <- struct{}{}
+	})
+	svc := NewService(repo, bus, &fakeCalculator{})
+	if _, err := svc.Complete(context.Background(), "tenant_a", "us", "chk_1", "complete-key"); err != nil {
+		t.Fatalf("first complete: %v", err)
+	}
+	select {
+	case <-published:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected first order.created event")
+	}
+	if _, err := svc.Complete(context.Background(), "tenant_a", "us", "chk_1", "complete-key"); err != nil {
+		t.Fatalf("second complete: %v", err)
+	}
+	select {
+	case <-published:
+		t.Fatal("unexpected second order.created on idempotent replay")
+	case <-time.After(200 * time.Millisecond):
+	}
+	if publishCount != 1 {
+		t.Fatalf("expected exactly one order.created publish, got %d", publishCount)
 	}
 }
 

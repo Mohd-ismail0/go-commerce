@@ -8,7 +8,6 @@ import (
 	"rewrite/internal/modules/pricing"
 	sharederrors "rewrite/internal/shared/errors"
 	"rewrite/internal/shared/events"
-	"rewrite/internal/shared/utils"
 )
 
 type Service struct {
@@ -320,10 +319,32 @@ func (s *Service) Recalculate(ctx context.Context, tenantID, regionID, checkoutI
 	return session, nil
 }
 
-func (s *Service) Complete(ctx context.Context, tenantID, regionID, checkoutID string) (CompleteResult, error) {
-	recalculated, err := s.Recalculate(ctx, tenantID, regionID, checkoutID)
+func (s *Service) Complete(ctx context.Context, tenantID, regionID, checkoutID, idempotencyKey string) (CompleteResult, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return CompleteResult{}, sharederrors.BadRequest("Idempotency-Key is required")
+	}
+	key := strings.TrimSpace(idempotencyKey)
+	checkoutID = strings.TrimSpace(checkoutID)
+
+	sess, err := s.repo.GetSession(ctx, tenantID, regionID, checkoutID)
 	if err != nil {
-		return CompleteResult{}, err
+		if errors.Is(err, ErrSessionNotFound) {
+			return CompleteResult{}, sharederrors.NotFound(err.Error())
+		}
+		return CompleteResult{}, sharederrors.Internal("failed to load checkout session")
+	}
+	if strings.EqualFold(strings.TrimSpace(sess.Status), "open") {
+		if _, err := s.Recalculate(ctx, tenantID, regionID, checkoutID); err != nil {
+			return CompleteResult{}, err
+		}
+	}
+
+	recalculated, err := s.repo.GetSession(ctx, tenantID, regionID, checkoutID)
+	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			return CompleteResult{}, sharederrors.NotFound(err.Error())
+		}
+		return CompleteResult{}, sharederrors.Internal("failed to load checkout session")
 	}
 	lines, err := s.repo.ListLines(ctx, tenantID, regionID, checkoutID)
 	if err != nil {
@@ -344,9 +365,14 @@ func (s *Service) Complete(ctx context.Context, tenantID, regionID, checkoutID s
 	if !covered {
 		return CompleteResult{}, sharederrors.Conflict("authorized payment coverage is required before checkout completion")
 	}
-	orderID := utils.NewID("ord")
-	saved, err := s.repo.Complete(ctx, tenantID, regionID, checkoutID, orderID)
+	outcome, err := s.repo.Complete(ctx, tenantID, regionID, checkoutID, key)
 	if err != nil {
+		if errors.Is(err, ErrCheckoutCompleteIdempotencyKeyRequired) {
+			return CompleteResult{}, sharederrors.BadRequest("Idempotency-Key is required")
+		}
+		if errors.Is(err, ErrCheckoutCompleteIdempotencyOrphan) {
+			return CompleteResult{}, sharederrors.Internal("checkout completion idempotency record is inconsistent")
+		}
 		if errors.Is(err, ErrSessionNotFound) {
 			return CompleteResult{}, sharederrors.NotFound(err.Error())
 		}
@@ -364,6 +390,8 @@ func (s *Service) Complete(ctx context.Context, tenantID, regionID, checkoutID s
 		}
 		return CompleteResult{}, sharederrors.Internal("failed to complete checkout")
 	}
-	s.bus.Publish(ctx, events.EventOrderCreated, saved)
-	return CompleteResult{OrderID: saved.ID}, nil
+	if !outcome.FromIdempotencyReplay {
+		s.bus.Publish(ctx, events.EventOrderCreated, outcome.Payload)
+	}
+	return CompleteResult{OrderID: outcome.Payload.ID}, nil
 }

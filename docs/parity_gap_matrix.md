@@ -11,14 +11,14 @@ This matrix tracks **functional parity** between Saleor (GraphQL-first reference
 
 Primary references: `docs/saleor_mapping.md`, `api/openapi.yaml`, `internal/modules/*`, `internal/app/app.go`.
 
-_Last updated: customer address POST idempotency (`customers.addresses.create:{customer_id}`, advisory lock + tx)._
+_Last updated: checkout complete idempotency (`checkouts.complete:{checkout_id}`, advisory lock + tx; no duplicate `order.created`)._
 
 ## API contract vs router
 
 | Capability | Status | Rewrite notes |
 | --- | --- | --- |
 | OpenAPI describes all HTTP routes | **Partial** | All major routes documented, including `/fulfillments` (see `post_fulfillments`, `get_fulfillments`). Re-audit when adding handlers. |
-| Idempotency on writes | **Partial** | Supported where OpenAPI marks `Idempotency-Key` (e.g. orders, payments, `POST /checkouts/sessions`, `POST /customers`, `POST /customers/{id}/addresses`); not uniform across every POST. |
+| Idempotency on writes | **Partial** | Supported where OpenAPI marks `Idempotency-Key` (e.g. orders, payments, `POST /checkouts/sessions`, `POST .../complete`, `POST /customers`, `POST /customers/{id}/addresses`); not uniform across every POST. |
 | GraphQL / subscriptions | **REST** | No GraphQL; webhooks + outbox replace plugin real-time patterns. |
 
 ## Checkout & cart
@@ -32,7 +32,7 @@ _Last updated: customer address POST idempotency (`customers.addresses.create:{c
 | Multiple shipping / split deliveries | **Gap** | Single shipping context on session. |
 | Gift cards | **Gap** | Not modeled in rewrite checkout/pricing paths. |
 | Checkout “problems” / errors collection | **Gap** | No Saleor-style aggregated checkout error list API. |
-| Complete → order | **Partial** | Requires authorized payment coverage vs `checkout_id`, shipping context when lines exist; creates order via checkout completion path. |
+| Complete → order | **Partial** | Requires `Idempotency-Key` on `POST .../complete` (scope `checkouts.complete:{checkout_id}`); replay returns stored order without re-emitting `order.created`. Requires authorized payment coverage vs `checkout_id`, shipping context when lines exist; creates order via checkout completion path. |
 | Checkout from saved addresses | **Partial** | `POST .../apply-customer-addresses` copies country/postal from `customer_addresses` under the session `customer_id` in one tx with `FOR UPDATE` on `checkout_sessions`. |
 
 ## Orders

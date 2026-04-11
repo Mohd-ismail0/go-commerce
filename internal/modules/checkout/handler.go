@@ -213,11 +213,17 @@ func (h *Handler) recalculate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) complete(w http.ResponseWriter, r *http.Request) {
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "Idempotency-Key header is required"})
+		return
+	}
 	saved, err := h.svc.Complete(
 		r.Context(),
 		middleware.TenantIDFromContext(r.Context()),
 		middleware.RegionIDFromContext(r.Context()),
 		chi.URLParam(r, "checkout_id"),
+		idempotencyKey,
 	)
 	if err != nil {
 		utils.WriteError(w, err)

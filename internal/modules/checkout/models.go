@@ -38,6 +38,12 @@ type CompleteResult struct {
 	OrderID string `json:"order_id"`
 }
 
+// CompleteOutcome is returned by the repository when finishing a checkout (new order or idempotency replay).
+type CompleteOutcome struct {
+	Payload               OrderCreatedPayload
+	FromIdempotencyReplay bool
+}
+
 type OrderCreatedPayload struct {
 	ID         string `json:"id"`
 	TenantID   string `json:"tenant_id"`
