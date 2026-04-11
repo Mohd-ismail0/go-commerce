@@ -1,5 +1,7 @@
 # Saleor to Rewrite Mapping
 
+For a **parity status matrix** (full / partial / gap / REST divergence), see [`parity_gap_matrix.md`](parity_gap_matrix.md).
+
 This document maps Saleor domain behavior to the Go rewrite modules and REST surface.
 Saleor references were taken from the Python/Django codebase under `saleor/saleor`.
 
