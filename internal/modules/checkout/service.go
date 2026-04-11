@@ -206,6 +206,33 @@ func (s *Service) UpdateSessionContext(ctx context.Context, tenantID, regionID, 
 	return s.Recalculate(ctx, tenantID, regionID, checkoutID)
 }
 
+// ApplyCustomerAddresses copies country and postal code from saved customer_addresses rows onto the open checkout (same customer_id), under one DB transaction with a session row lock.
+func (s *Service) ApplyCustomerAddresses(ctx context.Context, tenantID, regionID, checkoutID, shippingAddressID, billingAddressID string) (Session, error) {
+	if strings.TrimSpace(checkoutID) == "" {
+		return Session{}, sharederrors.BadRequest("checkout_id is required")
+	}
+	if strings.TrimSpace(shippingAddressID) == "" && strings.TrimSpace(billingAddressID) == "" {
+		return Session{}, sharederrors.BadRequest("at least one of shipping_address_id or billing_address_id is required")
+	}
+	session, err := s.repo.ApplyCustomerAddressesToCheckout(ctx, tenantID, regionID, checkoutID, shippingAddressID, billingAddressID)
+	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			return Session{}, sharederrors.NotFound(err.Error())
+		}
+		if errors.Is(err, ErrSessionNotOpen) {
+			return Session{}, sharederrors.Conflict(err.Error())
+		}
+		if errors.Is(err, ErrCustomerAddressNotApplicable) {
+			return Session{}, sharederrors.NotFound(err.Error())
+		}
+		return Session{}, sharederrors.Internal("failed to apply customer addresses to checkout")
+	}
+	if s.calculator == nil {
+		return session, nil
+	}
+	return s.Recalculate(ctx, tenantID, regionID, checkoutID)
+}
+
 func (s *Service) Recalculate(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error) {
 	var opts *RecalculateOptions
 	if s.calculator != nil {

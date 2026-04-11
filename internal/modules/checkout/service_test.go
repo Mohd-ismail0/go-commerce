@@ -21,6 +21,7 @@ type fakeRepo struct {
 	updateCtxErr      error
 	updateShippingErr error
 	updatePricingErr  error
+	applyAddrErr      error
 }
 
 func (f *fakeRepo) CreateSession(_ context.Context, in Session) (Session, error) {
@@ -92,6 +93,33 @@ func (f *fakeRepo) GetVariantProductID(_ context.Context, _, _, variantID string
 		return "prd_other", true, nil
 	}
 	return "", false, nil
+}
+
+func (f *fakeRepo) ApplyCustomerAddressesToCheckout(_ context.Context, _, _, checkoutID, shipID, billID string) (Session, error) {
+	if f.applyAddrErr != nil {
+		return Session{}, f.applyAddrErr
+	}
+	s := f.session
+	if s.ID == "" {
+		s = Session{ID: checkoutID, Status: "open", Currency: "USD", CustomerID: "cus_1"}
+	}
+	s.ID = checkoutID
+	if s.Status == "" {
+		s.Status = "open"
+	}
+	if s.Currency == "" {
+		s.Currency = "USD"
+	}
+	if strings.TrimSpace(shipID) != "" {
+		s.ShippingAddressCountry = "US"
+		s.ShippingAddressPostalCode = "90210"
+	}
+	if strings.TrimSpace(billID) != "" {
+		s.BillingAddressCountry = "CA"
+		s.BillingAddressPostalCode = "M5V"
+	}
+	f.session = s
+	return s, nil
 }
 
 func (f *fakeRepo) UpdateSessionContext(_ context.Context, _, _, checkoutID string, in Session) (Session, error) {
@@ -340,6 +368,27 @@ func TestRecalculateAppliesEligibleShippingMethod(t *testing.T) {
 	}
 	if updated.ShippingCents != 250 {
 		t.Fatalf("expected shipping cents to be 250, got %d", updated.ShippingCents)
+	}
+}
+
+func TestApplyCustomerAddressesRequiresAnID(t *testing.T) {
+	svc := NewService(&fakeRepo{}, events.NewBus(), &fakeCalculator{})
+	_, err := svc.ApplyCustomerAddresses(context.Background(), "t", "r", "chk_1", "", "  ")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestApplyCustomerAddressesMapsNotApplicableToNotFound(t *testing.T) {
+	repo := &fakeRepo{applyAddrErr: ErrCustomerAddressNotApplicable}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	_, err := svc.ApplyCustomerAddresses(context.Background(), "t", "r", "chk_1", "adr_1", "")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	apiErr, ok := err.(sharederrors.APIError)
+	if !ok || apiErr.Status != 404 {
+		t.Fatalf("expected 404 API error, got %#v", err)
 	}
 }
 

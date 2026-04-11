@@ -20,6 +20,7 @@ var ErrVoucherUnavailable = errors.New("voucher is unavailable")
 var ErrChannelListingMismatch = errors.New("checkout line no longer matches channel listing")
 var ErrShippingAddressCountryRequired = errors.New("shipping_address_country is required when shipping_method_id is set")
 var ErrShippingMethodNotEligible = errors.New("selected shipping method is not eligible for checkout context")
+var ErrCustomerAddressNotApplicable = errors.New("customer address not found or does not belong to this checkout customer")
 
 // RecalculateOptions configures transactional checkout recalculation when a pricing engine is available.
 type RecalculateOptions struct {
@@ -29,6 +30,7 @@ type RecalculateOptions struct {
 type Repository interface {
 	CreateSession(ctx context.Context, in Session) (Session, error)
 	UpdateSessionContext(ctx context.Context, tenantID, regionID, checkoutID string, in Session) (Session, error)
+	ApplyCustomerAddressesToCheckout(ctx context.Context, tenantID, regionID, checkoutID, shippingAddressID, billingAddressID string) (Session, error)
 	UpsertLine(ctx context.Context, tenantID, regionID string, line Line) (Line, error)
 	GetSession(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error)
 	ListLines(ctx context.Context, tenantID, regionID, checkoutID string) ([]Line, error)
@@ -262,6 +264,93 @@ WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 			return Session{}, ErrSessionNotFound
 		}
 		return Session{}, ErrSessionNotOpen
+	}
+	return r.getSession(ctx, tenantID, regionID, checkoutID)
+}
+
+func (r *PostgresRepository) ApplyCustomerAddressesToCheckout(ctx context.Context, tenantID, regionID, checkoutID, shippingAddressID, billingAddressID string) (Session, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Session{}, err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	var customerID, status string
+	var shipC, shipP, billC, billP string
+	err = tx.QueryRowContext(ctx, `
+SELECT customer_id, status,
+  COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''),
+  COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,'')
+FROM checkout_sessions
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+FOR UPDATE
+`, checkoutID, tenantID, regionID).Scan(&customerID, &status, &shipC, &shipP, &billC, &billP)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Session{}, ErrSessionNotFound
+	}
+	if err != nil {
+		return Session{}, err
+	}
+	if status != "open" {
+		return Session{}, ErrSessionNotOpen
+	}
+
+	shipID := strings.TrimSpace(shippingAddressID)
+	billID := strings.TrimSpace(billingAddressID)
+
+	finalShipC, finalShipP := shipC, shipP
+	finalBillC, finalBillP := billC, billP
+
+	if shipID != "" {
+		serr := tx.QueryRowContext(ctx, `
+SELECT UPPER(country_code), TRIM(postal_code)
+FROM customer_addresses
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND customer_id = $4
+`, shipID, tenantID, regionID, customerID).Scan(&finalShipC, &finalShipP)
+		if errors.Is(serr, sql.ErrNoRows) {
+			return Session{}, ErrCustomerAddressNotApplicable
+		}
+		if serr != nil {
+			return Session{}, serr
+		}
+	}
+	if billID != "" {
+		berr := tx.QueryRowContext(ctx, `
+SELECT UPPER(country_code), TRIM(postal_code)
+FROM customer_addresses
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND customer_id = $4
+`, billID, tenantID, regionID, customerID).Scan(&finalBillC, &finalBillP)
+		if errors.Is(berr, sql.ErrNoRows) {
+			return Session{}, ErrCustomerAddressNotApplicable
+		}
+		if berr != nil {
+			return Session{}, berr
+		}
+	}
+
+	res, uerr := tx.ExecContext(ctx, `
+UPDATE checkout_sessions
+SET shipping_address_country = NULLIF($4,''),
+    shipping_address_postal_code = NULLIF($5,''),
+    billing_address_country = NULLIF($6,''),
+    billing_address_postal_code = NULLIF($7,''),
+    updated_at = NOW()
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND status = 'open'
+`, checkoutID, tenantID, regionID, finalShipC, finalShipP, finalBillC, finalBillP)
+	if uerr != nil {
+		return Session{}, uerr
+	}
+	n, raErr := res.RowsAffected()
+	if raErr != nil {
+		return Session{}, raErr
+	}
+	if n == 0 {
+		return Session{}, ErrSessionNotOpen
+	}
+	if cerr := tx.Commit(); cerr != nil {
+		return Session{}, cerr
 	}
 	return r.getSession(ctx, tenantID, regionID, checkoutID)
 }

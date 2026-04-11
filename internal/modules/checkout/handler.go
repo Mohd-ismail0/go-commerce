@@ -23,6 +23,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Patch("/sessions/{checkout_id}", h.updateSessionContext)
 		r.Put("/sessions/{checkout_id}/lines", h.upsertLine)
 		r.Post("/sessions/{checkout_id}/recalculate", h.recalculate)
+		r.Post("/sessions/{checkout_id}/apply-customer-addresses", h.applyCustomerAddresses)
 		r.Post("/sessions/{checkout_id}/complete", h.complete)
 	})
 }
@@ -129,6 +130,30 @@ func (h *Handler) updateSessionContext(w http.ResponseWriter, r *http.Request) {
 			BillingAddressCountry:     req.BillingAddressCountry,
 			BillingAddressPostalCode:  req.BillingAddressPostalCode,
 		},
+	)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, updated)
+}
+
+func (h *Handler) applyCustomerAddresses(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ShippingAddressID string `json:"shipping_address_id"`
+		BillingAddressID  string `json:"billing_address_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
+		return
+	}
+	updated, err := h.svc.ApplyCustomerAddresses(
+		r.Context(),
+		middleware.TenantIDFromContext(r.Context()),
+		middleware.RegionIDFromContext(r.Context()),
+		chi.URLParam(r, "checkout_id"),
+		req.ShippingAddressID,
+		req.BillingAddressID,
 	)
 	if err != nil {
 		utils.WriteError(w, err)

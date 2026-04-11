@@ -441,6 +441,12 @@ components:
           type: string
           pattern: "^[A-Z]{2}$"
         billing_address_postal_code: { type: string }
+    CheckoutApplyCustomerAddressesInput:
+      type: object
+      description: Provide at least one address id. Each must be a customer_addresses row for the same customer_id as the checkout session.
+      properties:
+        shipping_address_id: { type: string }
+        billing_address_id: { type: string }
     CheckoutLine:
       type: object
       required: [id, checkout_id, quantity, unit_price_cents, currency]
@@ -981,6 +987,53 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Existing checkout lines incompatible with requested channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /checkouts/sessions/{checkout_id}/apply-customer-addresses:
+    post:
+      operationId: post_checkouts_sessions_by_checkout_id_apply_customer_addresses
+      summary: Apply saved customer addresses to checkout
+      description: |
+        Locks the checkout session row (`FOR UPDATE`), verifies it is `open`, loads `country_code` and `postal_code`
+        from `customer_addresses` scoped to the session's `customer_id`, then updates only shipping and/or billing
+        country and postal fields. Omitting an id leaves that side unchanged. Runs in one transaction; recalculates
+        totals when a pricing engine is configured.
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: checkout_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckoutApplyCustomerAddressesInput"
+      responses:
+        "200":
+          description: Checkout session updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutSession"
+        "400":
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Checkout or customer address not found / not applicable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Checkout session is not open
           content:
             application/json:
               schema:

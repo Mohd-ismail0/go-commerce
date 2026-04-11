@@ -11,7 +11,7 @@ This matrix tracks **functional parity** between Saleor (GraphQL-first reference
 
 Primary references: `docs/saleor_mapping.md`, `api/openapi.yaml`, `internal/modules/*`, `internal/app/app.go`.
 
-_Last updated: customer address CRUD with transactional default-address exclusivity._
+_Last updated: checkout apply-customer-addresses (locked session + scoped address lookup)._
 
 ## API contract vs router
 
@@ -33,6 +33,7 @@ _Last updated: customer address CRUD with transactional default-address exclusiv
 | Gift cards | **Gap** | Not modeled in rewrite checkout/pricing paths. |
 | Checkout “problems” / errors collection | **Gap** | No Saleor-style aggregated checkout error list API. |
 | Complete → order | **Partial** | Requires authorized payment coverage vs `checkout_id`, shipping context when lines exist; creates order via checkout completion path. |
+| Checkout from saved addresses | **Partial** | `POST .../apply-customer-addresses` copies country/postal from `customer_addresses` under the session `customer_id` in one tx with `FOR UPDATE` on `checkout_sessions`. |
 
 ## Orders
 
@@ -67,7 +68,7 @@ _Last updated: customer address CRUD with transactional default-address exclusiv
 | Capability | Status | Rewrite notes |
 | --- | --- | --- |
 | Customers list/save | **Partial** | Basic customer records; no rich account API parity. |
-| Addresses | **Partial** | `GET/POST /customers/{id}/addresses`, `PUT/DELETE .../addresses/{address_id}`; OpenAPI documented. Save runs in a tx with `SELECT ... FOR UPDATE` on `customers` and clears competing default shipping/billing flags on other rows. |
+| Addresses | **Partial** | `GET/POST /customers/{id}/addresses`, `PUT/DELETE .../addresses/{address_id}`; OpenAPI documented. Save runs in a tx with `SELECT ... FOR UPDATE` on `customers` and clears competing default shipping/billing flags on other rows. Checkouts can pull country/postal via `POST /checkouts/sessions/{id}/apply-customer-addresses`. |
 | Auth (login / refresh / logout) | **Partial** | Identity module: sessions, revoke, device binding options—overlap with Saleor JWT flows but not identical. |
 | Staff / permissions model | **Partial** | Policy middleware + DB permissions; differs from Saleor’s dashboard permission graph. |
 
