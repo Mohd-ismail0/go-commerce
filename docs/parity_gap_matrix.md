@@ -11,22 +11,22 @@ This matrix tracks **functional parity** between Saleor (GraphQL-first reference
 
 Primary references: `docs/saleor_mapping.md`, `api/openapi.yaml`, `internal/modules/*`, `internal/app/app.go`.
 
-_Last updated: checkout line upsert idempotency (`checkouts.line.upsert:{checkout_id}:{line_id}`, advisory lock + tx)._
+_Last updated: checkout recalculate idempotency (`checkouts.recalculate:{checkout_id}`, advisory lock + tx)._
 
 ## API contract vs router
 
 | Capability | Status | Rewrite notes |
 | --- | --- | --- |
 | OpenAPI describes all HTTP routes | **Partial** | All major routes documented, including `/fulfillments` (see `post_fulfillments`, `get_fulfillments`). Re-audit when adding handlers. |
-| Idempotency on writes | **Partial** | Supported where OpenAPI marks `Idempotency-Key` (e.g. orders, payments, checkout session create/complete/apply-addresses/lines upsert, `POST /customers`, `POST /customers/{id}/addresses`); not uniform across every write. |
+| Idempotency on writes | **Partial** | Supported where OpenAPI marks `Idempotency-Key` (e.g. orders, payments, checkout session create/complete/recalculate/apply-addresses/lines upsert, `POST /customers`, `POST /customers/{id}/addresses`); not uniform across every write. |
 | GraphQL / subscriptions | **REST** | No GraphQL; webhooks + outbox replace plugin real-time patterns. |
 
 ## Checkout & cart
 
 | Capability | Status | Rewrite notes |
 | --- | --- | --- |
-| Checkout session lifecycle | **Partial** | `POST` create requires `Idempotency-Key` (scope `checkouts.sessions.create`, transactional + advisory lock). `GET/PATCH` session, `GET` lines, `PUT` line (requires `Idempotency-Key`, scope `checkouts.line.upsert:{checkout_id}:{line_id}`), `recalculate`, `complete`. `GET .../lines` returns 404 if the session id is unknown (empty cart is `items: []`). Open/non-open immutability enforced on writes. |
-| Atomic totals refresh | **Full** | `Recalculate`: `FOR UPDATE` on open session; subtotal, shipping, tax/total in **one transaction**. |
+| Checkout session lifecycle | **Partial** | `POST` create requires `Idempotency-Key` (scope `checkouts.sessions.create`, transactional + advisory lock). `GET/PATCH` session, `GET` lines, `PUT` line (requires `Idempotency-Key`, scope `checkouts.line.upsert:{checkout_id}:{line_id}`), `POST .../recalculate` (requires `Idempotency-Key`, scope `checkouts.recalculate:{checkout_id}`), `complete`. `GET .../lines` returns 404 if the session id is unknown (empty cart is `items: []`). Open/non-open immutability enforced on writes. |
+| Atomic totals refresh | **Full** | `Recalculate`: `FOR UPDATE` on open session; subtotal, shipping, tax/total in **one transaction**. HTTP `POST .../recalculate` is idempotent (same pattern as other checkout writes); internal follow-up recalcs (e.g. after `PATCH` session or before complete) use the same repo path without persisting an idempotency key. |
 | Shipping method on checkout | **Partial** | Method id + country/postal on session; eligibility via `shipping_methods` rules (channels, postal prefixes, min/max order). |
 | Stock reservation per line | **Partial** | `PUT` checkout line (idempotent) acquires a **soft reservation** (`stock_reservations` per `checkout_line_id`, 7d TTL) under `SELECT FOR UPDATE` on session + stock; salable qty = `stock_items.quantity` minus other active reservations. Replays with the same key return the stored line without re-running reservation logic. `Complete` deducts stock, clears this checkout’s reservations, and requires `on_hand >= other_checkouts’ reservations + line demand`. No multi-warehouse optimizer beyond `resolveStockItemID`. |
 | Multiple shipping / split deliveries | **Gap** | Single shipping context on session. |

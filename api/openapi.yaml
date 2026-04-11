@@ -1269,9 +1269,13 @@ paths:
     post:
       operationId: post_checkouts_sessions_by_checkout_id_recalculate
       summary: Recalculate checkout totals
+      description: |
+        Idempotent by `Idempotency-Key` per tenant; scope `checkouts.recalculate:{checkout_id}` with advisory lock +
+        idempotency save in the same transaction as the totals refresh. Replays return the stored session snapshot without re-running pricing.
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
+        - $ref: "#/components/parameters/IdempotencyHeader"
         - in: path
           name: checkout_id
           required: true
@@ -1283,8 +1287,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CheckoutSession"
+        "400":
+          description: Missing idempotency header or invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Checkout not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Checkout not open, or shipping method ineligible / missing address context for shipping
           content:
             application/json:
               schema:

@@ -27,6 +27,7 @@ type fakeRepo struct {
 	idem                  map[string]Session
 	completePayloadByIdem map[string]OrderCreatedPayload
 	lineUpsertIdem        map[string]Line
+	recalcIdem            map[string]Session
 }
 
 func (f *fakeRepo) CreateSession(_ context.Context, in Session, idempotencyKey string) (Session, error) {
@@ -175,7 +176,16 @@ func (f *fakeRepo) UpdateSessionContext(_ context.Context, _, _, checkoutID stri
 	return in, nil
 }
 
-func (f *fakeRepo) Recalculate(ctx context.Context, _, _, checkoutID string, opts *RecalculateOptions) (Session, error) {
+func (f *fakeRepo) Recalculate(ctx context.Context, tenantID, _, checkoutID string, opts *RecalculateOptions, idempotencyKey string) (Session, error) {
+	key := strings.TrimSpace(idempotencyKey)
+	if key != "" {
+		idemK := tenantID + "|" + checkoutRecalculateScope(checkoutID) + "|" + key
+		if f.recalcIdem != nil {
+			if prev, ok := f.recalcIdem[idemK]; ok {
+				return prev, nil
+			}
+		}
+	}
 	s := f.session
 	if s.ID == "" {
 		s = Session{ID: checkoutID, Status: "open", Currency: "USD", SubtotalCents: 1000, ShippingCents: 200, TotalCents: 1200}
@@ -195,6 +205,12 @@ func (f *fakeRepo) Recalculate(ctx context.Context, _, _, checkoutID string, opt
 	}
 	if opts == nil || opts.ComputePricing == nil {
 		f.session = s
+		if key != "" {
+			if f.recalcIdem == nil {
+				f.recalcIdem = make(map[string]Session)
+			}
+			f.recalcIdem[tenantID+"|"+checkoutRecalculateScope(checkoutID)+"|"+key] = s
+		}
 		return s, nil
 	}
 	session := s
@@ -229,6 +245,12 @@ func (f *fakeRepo) Recalculate(ctx context.Context, _, _, checkoutID string, opt
 	session.TaxCents = taxCents
 	session.TotalCents = totalCents
 	f.session = session
+	if key != "" {
+		if f.recalcIdem == nil {
+			f.recalcIdem = make(map[string]Session)
+		}
+		f.recalcIdem[tenantID+"|"+checkoutRecalculateScope(checkoutID)+"|"+key] = session
+	}
 	return session, nil
 }
 
@@ -472,12 +494,34 @@ func TestRecalculateAppliesEligibleShippingMethod(t *testing.T) {
 		},
 	}
 	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
-	updated, err := svc.Recalculate(context.Background(), "tenant_a", "us", "chk_1")
+	updated, err := svc.Recalculate(context.Background(), "tenant_a", "us", "chk_1", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if updated.ShippingCents != 250 {
 		t.Fatalf("expected shipping cents to be 250, got %d", updated.ShippingCents)
+	}
+}
+
+func TestRecalculateIdempotentReplayReturnsFirstTotals(t *testing.T) {
+	repo := &fakeRepo{
+		session: Session{
+			ID:       "chk_1",
+			Status:   "open",
+			Currency: "USD",
+		},
+	}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	first, err := svc.Recalculate(context.Background(), "tenant_a", "us", "chk_1", "recalc-idem-key")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	second, err := svc.Recalculate(context.Background(), "tenant_a", "us", "chk_1", "recalc-idem-key")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if first.TotalCents != second.TotalCents {
+		t.Fatalf("expected idempotent replay, first=%+v second=%+v", first, second)
 	}
 }
 
@@ -542,7 +586,7 @@ func TestRecalculateMapsUpdateShippingSessionNotOpenToConflict(t *testing.T) {
 		},
 	}
 	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
-	_, err := svc.Recalculate(context.Background(), "tenant_a", "us", "chk_1")
+	_, err := svc.Recalculate(context.Background(), "tenant_a", "us", "chk_1", "")
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -562,7 +606,7 @@ func TestRecalculateMapsUpdatePricingSessionNotOpenToConflict(t *testing.T) {
 		},
 	}
 	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
-	_, err := svc.Recalculate(context.Background(), "tenant_a", "us", "chk_1")
+	_, err := svc.Recalculate(context.Background(), "tenant_a", "us", "chk_1", "")
 	if err == nil {
 		t.Fatalf("expected error")
 	}

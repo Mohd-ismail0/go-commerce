@@ -264,7 +264,7 @@ func (s *Service) UpdateSessionContext(ctx context.Context, tenantID, regionID, 
 	if s.calculator == nil {
 		return updated, nil
 	}
-	return s.Recalculate(ctx, tenantID, regionID, checkoutID)
+	return s.Recalculate(ctx, tenantID, regionID, checkoutID, "")
 }
 
 // ApplyCustomerAddresses copies country and postal code from saved customer_addresses rows onto the open checkout (same customer_id), under one DB transaction with a session row lock.
@@ -301,10 +301,13 @@ func (s *Service) ApplyCustomerAddresses(ctx context.Context, tenantID, regionID
 	if s.calculator == nil {
 		return session, nil
 	}
-	return s.Recalculate(ctx, tenantID, regionID, checkoutID)
+	return s.Recalculate(ctx, tenantID, regionID, checkoutID, "")
 }
 
-func (s *Service) Recalculate(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error) {
+// Recalculate refreshes subtotal from lines, then shipping and tax/total when a pricing calculator is configured.
+// Pass an empty idempotencyKey for internal orchestration (e.g. complete checkout, context updates); the HTTP handler always supplies a key.
+func (s *Service) Recalculate(ctx context.Context, tenantID, regionID, checkoutID, idempotencyKey string) (Session, error) {
+	key := strings.TrimSpace(idempotencyKey)
 	var opts *RecalculateOptions
 	if s.calculator != nil {
 		opts = &RecalculateOptions{
@@ -323,8 +326,11 @@ func (s *Service) Recalculate(ctx context.Context, tenantID, regionID, checkoutI
 			},
 		}
 	}
-	session, err := s.repo.Recalculate(ctx, tenantID, regionID, checkoutID, opts)
+	session, err := s.repo.Recalculate(ctx, tenantID, regionID, checkoutID, opts, key)
 	if err != nil {
+		if errors.Is(err, ErrCheckoutRecalculateIdempotencyOrphan) || errors.Is(err, ErrCheckoutRecalculateIdempotencyMismatch) {
+			return Session{}, sharederrors.Internal("checkout recalculate idempotency record is inconsistent")
+		}
 		if errors.Is(err, ErrSessionNotFound) {
 			return Session{}, sharederrors.NotFound(err.Error())
 		}
@@ -354,7 +360,7 @@ func (s *Service) Complete(ctx context.Context, tenantID, regionID, checkoutID, 
 		return CompleteResult{}, sharederrors.Internal("failed to load checkout session")
 	}
 	if strings.EqualFold(strings.TrimSpace(sess.Status), "open") {
-		if _, err := s.Recalculate(ctx, tenantID, regionID, checkoutID); err != nil {
+		if _, err := s.Recalculate(ctx, tenantID, regionID, checkoutID, ""); err != nil {
 			return CompleteResult{}, err
 		}
 	}
