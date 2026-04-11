@@ -116,6 +116,21 @@ type CustomerAddress struct {
 	UpdatedAt         time.Time
 }
 
+type EventOutbox struct {
+	ID            string
+	TenantID      string
+	RegionID      string
+	EventName     string
+	AggregateType string
+	AggregateID   string
+	Payload       json.RawMessage
+	Status        string
+	AvailableAt   time.Time
+	Attempts      int64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 type IdempotencyKey struct {
 	ID             int64
 	TenantID       string
@@ -332,6 +347,21 @@ type VariantChannelListing struct {
 	PublishedAt sql.NullTime
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+}
+
+type WebhookDelivery struct {
+	ID             string
+	TenantID       string
+	RegionID       string
+	OutboxID       string
+	SubscriptionID string
+	Status         string
+	ResponseStatus sql.NullInt64
+	ResponseBody   sql.NullString
+	Attempts       int64
+	NextRetryAt    sql.NullTime
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 type WebhookEndpoint struct {
