@@ -63,7 +63,11 @@ func (s *Service) ListLines(ctx context.Context, tenantID, regionID, checkoutID 
 	return lines, nil
 }
 
-func (s *Service) CreateSession(ctx context.Context, in Session) (Session, error) {
+func (s *Service) CreateSession(ctx context.Context, in Session, idempotencyKey string) (Session, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return Session{}, sharederrors.BadRequest("Idempotency-Key is required")
+	}
+	key := strings.TrimSpace(idempotencyKey)
 	if strings.TrimSpace(in.CustomerID) == "" || len(strings.TrimSpace(in.Currency)) != 3 {
 		return Session{}, sharederrors.BadRequest("invalid checkout payload")
 	}
@@ -85,7 +89,17 @@ func (s *Service) CreateSession(ctx context.Context, in Session) (Session, error
 	if in.Status == "" {
 		in.Status = "open"
 	}
-	return s.repo.CreateSession(ctx, in)
+	saved, err := s.repo.CreateSession(ctx, in, key)
+	if err != nil {
+		if errors.Is(err, ErrIdempotencyKeyRequired) {
+			return Session{}, sharederrors.BadRequest("Idempotency-Key is required")
+		}
+		if errors.Is(err, ErrCheckoutIdempotencyOrphan) {
+			return Session{}, sharederrors.Internal("checkout idempotency record is inconsistent")
+		}
+		return Session{}, sharederrors.Internal("failed to create checkout session")
+	}
+	return saved, nil
 }
 
 func (s *Service) UpsertLine(ctx context.Context, tenantID, regionID string, in Line) (Line, error) {

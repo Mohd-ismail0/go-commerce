@@ -935,9 +935,15 @@ paths:
     post:
       operationId: post_checkouts_sessions
       summary: Create checkout session
+      description: |
+        Idempotent create by `Idempotency-Key` per tenant (scope `checkouts.sessions.create`).
+        Retries with the same key return the original session (`201` with the stored row), including when the
+        retried JSON would have generated a different checkout id. Uses a transaction with `pg_advisory_xact_lock`
+        so concurrent duplicate keys cannot create two sessions.
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
+        - $ref: "#/components/parameters/IdempotencyHeader"
       requestBody:
         required: true
         content:

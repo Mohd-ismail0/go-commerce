@@ -9,8 +9,11 @@ import (
 	"strings"
 	"time"
 
+	dbsqlc "rewrite/internal/shared/db/sqlc"
 	"rewrite/internal/shared/utils"
 )
+
+const checkoutSessionCreateScope = "checkouts.sessions.create"
 
 var ErrSessionNotFound = errors.New("checkout session not found")
 var ErrSessionNotOpen = errors.New("checkout session is not open")
@@ -21,6 +24,8 @@ var ErrChannelListingMismatch = errors.New("checkout line no longer matches chan
 var ErrShippingAddressCountryRequired = errors.New("shipping_address_country is required when shipping_method_id is set")
 var ErrShippingMethodNotEligible = errors.New("selected shipping method is not eligible for checkout context")
 var ErrCustomerAddressNotApplicable = errors.New("customer address not found or does not belong to this checkout customer")
+var ErrIdempotencyKeyRequired = errors.New("checkout idempotency key is required")
+var ErrCheckoutIdempotencyOrphan = errors.New("idempotency record references missing checkout session")
 
 // RecalculateOptions configures transactional checkout recalculation when a pricing engine is available.
 type RecalculateOptions struct {
@@ -28,7 +33,7 @@ type RecalculateOptions struct {
 }
 
 type Repository interface {
-	CreateSession(ctx context.Context, in Session) (Session, error)
+	CreateSession(ctx context.Context, in Session, idempotencyKey string) (Session, error)
 	UpdateSessionContext(ctx context.Context, tenantID, regionID, checkoutID string, in Session) (Session, error)
 	ApplyCustomerAddressesToCheckout(ctx context.Context, tenantID, regionID, checkoutID, shippingAddressID, billingAddressID string) (Session, error)
 	UpsertLine(ctx context.Context, tenantID, regionID string, line Line) (Line, error)
@@ -47,20 +52,82 @@ type Repository interface {
 }
 
 type PostgresRepository struct {
-	db *sql.DB
+	db      *sql.DB
+	queries *dbsqlc.Queries
 }
 
 func NewRepository(conn *sql.DB) Repository {
-	return &PostgresRepository{db: conn}
+	return &PostgresRepository{db: conn, queries: dbsqlc.New(conn)}
 }
 
-func (r *PostgresRepository) CreateSession(ctx context.Context, in Session) (Session, error) {
-	row := r.db.QueryRowContext(ctx, `
+func (r *PostgresRepository) CreateSession(ctx context.Context, in Session, idempotencyKey string) (Session, error) {
+	key := strings.TrimSpace(idempotencyKey)
+	if key == "" {
+		return Session{}, ErrIdempotencyKeyRequired
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Session{}, err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	lockKey := in.TenantID + "\x00" + checkoutSessionCreateScope + "\x00" + key
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1::text))`, lockKey); err != nil {
+		return Session{}, err
+	}
+
+	qtx := r.queries.WithTx(tx)
+	resourceID, idemErr := qtx.GetIdempotencyResource(ctx, dbsqlc.GetIdempotencyResourceParams{
+		TenantID:       in.TenantID,
+		Scope:          checkoutSessionCreateScope,
+		IdempotencyKey: key,
+	})
+	if idemErr == nil && resourceID != "" {
+		row := tx.QueryRowContext(ctx, `
+SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+FROM checkout_sessions
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+`, resourceID, in.TenantID, in.RegionID)
+		sess, scanErr := scanSession(row)
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			return Session{}, fmt.Errorf("%w: %q", ErrCheckoutIdempotencyOrphan, resourceID)
+		}
+		if scanErr != nil {
+			return Session{}, scanErr
+		}
+		if err := tx.Commit(); err != nil {
+			return Session{}, err
+		}
+		return sess, nil
+	}
+	if idemErr != nil && !errors.Is(idemErr, sql.ErrNoRows) {
+		return Session{}, idemErr
+	}
+
+	row := tx.QueryRowContext(ctx, `
 INSERT INTO checkout_sessions (id, tenant_id, region_id, customer_id, channel_id, shipping_method_id, shipping_address_country, shipping_address_postal_code, billing_address_country, billing_address_postal_code, status, currency, voucher_code, promotion_id, tax_class_id, country_code, subtotal_cents, shipping_cents, tax_cents, total_cents, created_at, updated_at)
 VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),$11,$12,NULLIF($13,''),NULLIF($14,''),NULLIF($15,''),NULLIF($16,''),0,0,0,0,NOW(),NOW())
 RETURNING id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
 `, in.ID, in.TenantID, in.RegionID, in.CustomerID, in.ChannelID, in.ShippingMethodID, in.ShippingAddressCountry, in.ShippingAddressPostalCode, in.BillingAddressCountry, in.BillingAddressPostalCode, in.Status, in.Currency, in.VoucherCode, in.PromotionID, in.TaxClassID, in.CountryCode)
-	return scanSession(row)
+	saved, err := scanSession(row)
+	if err != nil {
+		return Session{}, err
+	}
+	if err := qtx.SaveIdempotencyResource(ctx, dbsqlc.SaveIdempotencyResourceParams{
+		TenantID:       in.TenantID,
+		Scope:          checkoutSessionCreateScope,
+		IdempotencyKey: key,
+		ResourceID:     saved.ID,
+	}); err != nil {
+		return Session{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Session{}, err
+	}
+	return saved, nil
 }
 
 func (r *PostgresRepository) UpsertLine(ctx context.Context, tenantID, regionID string, line Line) (Line, error) {

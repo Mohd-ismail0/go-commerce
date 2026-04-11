@@ -11,21 +11,21 @@ This matrix tracks **functional parity** between Saleor (GraphQL-first reference
 
 Primary references: `docs/saleor_mapping.md`, `api/openapi.yaml`, `internal/modules/*`, `internal/app/app.go`.
 
-_Last updated: checkout GET session + GET lines (tenant/region scoped; 404 when session missing)._
+_Last updated: checkout session create idempotency (`checkouts.sessions.create`, advisory lock + tx)._
 
 ## API contract vs router
 
 | Capability | Status | Rewrite notes |
 | --- | --- | --- |
 | OpenAPI describes all HTTP routes | **Partial** | All major routes documented, including `/fulfillments` (see `post_fulfillments`, `get_fulfillments`). Re-audit when adding handlers. |
-| Idempotency on writes | **Partial** | Supported where OpenAPI marks `Idempotency-Key` (e.g. orders, payments); not uniform across every POST. |
+| Idempotency on writes | **Partial** | Supported where OpenAPI marks `Idempotency-Key` (e.g. orders, payments, `POST /checkouts/sessions`); not uniform across every POST. |
 | GraphQL / subscriptions | **REST** | No GraphQL; webhooks + outbox replace plugin real-time patterns. |
 
 ## Checkout & cart
 
 | Capability | Status | Rewrite notes |
 | --- | --- | --- |
-| Checkout session lifecycle | **Partial** | `GET/PATCH` session, `GET/PUT` lines, `recalculate`, `complete`. `GET .../lines` returns 404 if the session id is unknown (empty cart is `items: []`). Open/non-open immutability enforced on writes. |
+| Checkout session lifecycle | **Partial** | `POST` create requires `Idempotency-Key` (scope `checkouts.sessions.create`, transactional + advisory lock). `GET/PATCH` session, `GET/PUT` lines, `recalculate`, `complete`. `GET .../lines` returns 404 if the session id is unknown (empty cart is `items: []`). Open/non-open immutability enforced on writes. |
 | Atomic totals refresh | **Full** | `Recalculate`: `FOR UPDATE` on open session; subtotal, shipping, tax/total in **one transaction**. |
 | Shipping method on checkout | **Partial** | Method id + country/postal on session; eligibility via `shipping_methods` rules (channels, postal prefixes, min/max order). |
 | Stock reservation per line | **Partial** | `PUT` checkout line acquires a **soft reservation** (`stock_reservations` per `checkout_line_id`, 7d TTL) under `SELECT FOR UPDATE` on session + stock; salable qty = `stock_items.quantity` minus other active reservations. `Complete` deducts stock, clears this checkout’s reservations, and requires `on_hand >= other_checkouts’ reservations + line demand`. No multi-warehouse optimizer beyond `resolveStockItemID`. |

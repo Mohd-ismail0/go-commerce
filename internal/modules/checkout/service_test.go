@@ -23,9 +23,21 @@ type fakeRepo struct {
 	updatePricingErr  error
 	applyAddrErr      error
 	getSessionErr     error
+	idem              map[string]Session
 }
 
-func (f *fakeRepo) CreateSession(_ context.Context, in Session) (Session, error) {
+func (f *fakeRepo) CreateSession(_ context.Context, in Session, idempotencyKey string) (Session, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return Session{}, ErrIdempotencyKeyRequired
+	}
+	k := in.TenantID + "|" + checkoutSessionCreateScope + "|" + strings.TrimSpace(idempotencyKey)
+	if f.idem == nil {
+		f.idem = make(map[string]Session)
+	}
+	if prev, ok := f.idem[k]; ok {
+		return prev, nil
+	}
+	f.idem[k] = in
 	return in, nil
 }
 
@@ -494,9 +506,54 @@ func TestCreateSessionRejectsInactiveChannel(t *testing.T) {
 		CustomerID: "cus_1",
 		ChannelID:  "inactive",
 		Currency:   "USD",
-	})
+	}, "idem-channel")
 	if err == nil {
 		t.Fatalf("expected error")
+	}
+}
+
+func TestCreateSessionRequiresIdempotencyKey(t *testing.T) {
+	svc := NewService(&fakeRepo{}, events.NewBus(), nil)
+	_, err := svc.CreateSession(context.Background(), Session{
+		TenantID:   "t",
+		RegionID:   "r",
+		CustomerID: "c",
+		Currency:   "USD",
+	}, "  ")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	apiErr, ok := err.(sharederrors.APIError)
+	if !ok || apiErr.Status != 400 {
+		t.Fatalf("expected 400 API error, got %#v", err)
+	}
+}
+
+func TestCreateSessionIdempotentReplayReturnsFirstSession(t *testing.T) {
+	repo := &fakeRepo{}
+	svc := NewService(repo, events.NewBus(), nil)
+	first, err := svc.CreateSession(context.Background(), Session{
+		ID:         "chk_first",
+		TenantID:   "tenant_a",
+		RegionID:   "us",
+		CustomerID: "cus_1",
+		Currency:   "USD",
+	}, "same-key")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	second, err := svc.CreateSession(context.Background(), Session{
+		ID:         "chk_second",
+		TenantID:   "tenant_a",
+		RegionID:   "us",
+		CustomerID: "cus_1",
+		Currency:   "USD",
+	}, "same-key")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if first.ID != second.ID || first.ID != "chk_first" {
+		t.Fatalf("expected replay of first session id, got first=%+v second=%+v", first, second)
 	}
 }
 

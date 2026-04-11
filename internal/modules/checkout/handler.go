@@ -3,6 +3,7 @@ package checkout
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"rewrite/internal/shared/middleware"
@@ -54,6 +55,11 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		id = utils.NewID("chk")
 	}
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "Idempotency-Key header is required"})
+		return
+	}
 	saved, err := h.svc.CreateSession(r.Context(), Session{
 		ID:                        id,
 		TenantID:                  middleware.TenantIDFromContext(r.Context()),
@@ -70,7 +76,7 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		PromotionID:               req.PromotionID,
 		TaxClassID:                req.TaxClassID,
 		CountryCode:               req.CountryCode,
-	})
+	}, idempotencyKey)
 	if err != nil {
 		utils.WriteError(w, err)
 		return
