@@ -11,14 +11,14 @@ This matrix tracks **functional parity** between Saleor (GraphQL-first reference
 
 Primary references: `docs/saleor_mapping.md`, `api/openapi.yaml`, `internal/modules/*`, `internal/app/app.go`.
 
-_Last updated: customer save idempotency (`customers.save`, advisory lock + tx + email check in tx)._
+_Last updated: customer address POST idempotency (`customers.addresses.create:{customer_id}`, advisory lock + tx)._
 
 ## API contract vs router
 
 | Capability | Status | Rewrite notes |
 | --- | --- | --- |
 | OpenAPI describes all HTTP routes | **Partial** | All major routes documented, including `/fulfillments` (see `post_fulfillments`, `get_fulfillments`). Re-audit when adding handlers. |
-| Idempotency on writes | **Partial** | Supported where OpenAPI marks `Idempotency-Key` (e.g. orders, payments, `POST /checkouts/sessions`, `POST /customers`); not uniform across every POST. |
+| Idempotency on writes | **Partial** | Supported where OpenAPI marks `Idempotency-Key` (e.g. orders, payments, `POST /checkouts/sessions`, `POST /customers`, `POST /customers/{id}/addresses`); not uniform across every POST. |
 | GraphQL / subscriptions | **REST** | No GraphQL; webhooks + outbox replace plugin real-time patterns. |
 
 ## Checkout & cart
@@ -68,7 +68,7 @@ _Last updated: customer save idempotency (`customers.save`, advisory lock + tx +
 | Capability | Status | Rewrite notes |
 | --- | --- | --- |
 | Customers list/save | **Partial** | Basic customer records; `POST /customers` requires `Idempotency-Key` (scope `customers.save`, transactional + advisory lock). No rich account API parity. |
-| Addresses | **Partial** | `GET/POST /customers/{id}/addresses`, `PUT/DELETE .../addresses/{address_id}`; OpenAPI documented. Save runs in a tx with `SELECT ... FOR UPDATE` on `customers` and clears competing default shipping/billing flags on other rows. Checkouts can pull country/postal via `POST /checkouts/sessions/{id}/apply-customer-addresses`. |
+| Addresses | **Partial** | `GET/POST /customers/{id}/addresses`, `PUT/DELETE .../addresses/{address_id}`; OpenAPI documented. `POST` requires `Idempotency-Key` (per-customer scope `customers.addresses.create:{customer_id}`, advisory lock + idempotency save in the same tx as customer lock). Save runs in a tx with `SELECT ... FOR UPDATE` on `customers` and clears competing default shipping/billing flags on other rows. Checkouts can pull country/postal via `POST /checkouts/sessions/{id}/apply-customer-addresses`. |
 | Auth (login / refresh / logout) | **Partial** | Identity module: sessions, revoke, device binding options—overlap with Saleor JWT flows but not identical. |
 | Staff / permissions model | **Partial** | Policy middleware + DB permissions; differs from Saleor’s dashboard permission graph. |
 

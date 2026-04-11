@@ -2211,9 +2211,12 @@ paths:
       description: |
         Locks the customer row and, when default flags are set, clears the same default on other addresses
         for that customer in the same transaction (at most one default shipping and one default billing).
+        Idempotent by `Idempotency-Key` per tenant; scope is `customers.addresses.create:{customer_id}` so keys
+        are isolated per customer. Uses `pg_advisory_xact_lock` in the same transaction before the customer `FOR UPDATE`.
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
+        - $ref: "#/components/parameters/IdempotencyHeader"
         - in: path
           name: customer_id
           required: true

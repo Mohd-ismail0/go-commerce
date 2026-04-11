@@ -83,11 +83,17 @@ func (h *Handler) createAddress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	customerID := chi.URLParam(r, "customer_id")
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "Idempotency-Key header is required"})
+		return
+	}
 	saved, err := h.svc.CreateAddress(
 		r.Context(),
 		middleware.TenantIDFromContext(r.Context()),
 		middleware.RegionIDFromContext(r.Context()),
 		customerID,
+		idempotencyKey,
 		body,
 	)
 	if err != nil {

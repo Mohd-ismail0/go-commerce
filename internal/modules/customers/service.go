@@ -14,7 +14,7 @@ type serviceRepository interface {
 	Save(ctx context.Context, customer Customer, idempotencyKey string) (Customer, error)
 	List(ctx context.Context, tenantID, regionID string) ([]Customer, error)
 	ListAddresses(ctx context.Context, tenantID, regionID, customerID string) ([]Address, error)
-	SaveAddress(ctx context.Context, a Address) (Address, error)
+	SaveAddress(ctx context.Context, a Address, idempotencyKey string) (Address, error)
 	DeleteAddress(ctx context.Context, tenantID, regionID, customerID, addressID string) error
 }
 
@@ -85,7 +85,11 @@ func (s *Service) ListAddresses(ctx context.Context, tenantID, regionID, custome
 }
 
 // CreateAddress persists a new address. tenant_id and region_id on the input are ignored and taken from arguments.
-func (s *Service) CreateAddress(ctx context.Context, tenantID, regionID, customerID string, in Address) (Address, error) {
+func (s *Service) CreateAddress(ctx context.Context, tenantID, regionID, customerID, idempotencyKey string, in Address) (Address, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return Address{}, sharederrors.BadRequest("Idempotency-Key is required")
+	}
+	key := strings.TrimSpace(idempotencyKey)
 	if strings.TrimSpace(customerID) == "" {
 		return Address{}, sharederrors.BadRequest("customer_id is required")
 	}
@@ -99,10 +103,13 @@ func (s *Service) CreateAddress(ctx context.Context, tenantID, regionID, custome
 	if err := normalizeAndValidateAddress(&in); err != nil {
 		return Address{}, err
 	}
-	saved, err := s.repo.SaveAddress(ctx, in)
+	saved, err := s.repo.SaveAddress(ctx, in, key)
 	if err != nil {
 		if errors.Is(err, ErrCustomerNotFound) {
 			return Address{}, sharederrors.NotFound(err.Error())
+		}
+		if errors.Is(err, ErrAddressIdempotencyOrphan) {
+			return Address{}, sharederrors.Internal("customer address idempotency record is inconsistent")
 		}
 		return Address{}, sharederrors.Internal("failed to save customer address")
 	}
@@ -121,7 +128,7 @@ func (s *Service) ReplaceAddress(ctx context.Context, tenantID, regionID, custom
 	if err := normalizeAndValidateAddress(&in); err != nil {
 		return Address{}, err
 	}
-	saved, err := s.repo.SaveAddress(ctx, in)
+	saved, err := s.repo.SaveAddress(ctx, in, "")
 	if err != nil {
 		if errors.Is(err, ErrCustomerNotFound) {
 			return Address{}, sharederrors.NotFound(err.Error())

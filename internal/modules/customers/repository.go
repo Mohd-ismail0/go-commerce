@@ -14,6 +14,10 @@ import (
 
 const customerSaveIdempotencyScope = "customers.save"
 
+func addressCreateIdempotencyScope(customerID string) string {
+	return "customers.addresses.create:" + customerID
+}
+
 type Repository struct {
 	db      *sql.DB
 	queries *dbsqlc.Queries
@@ -24,6 +28,7 @@ var ErrAddressNotFound = errors.New("address not found")
 var ErrIdempotencyKeyRequired = errors.New("customer idempotency key is required")
 var ErrCustomerIdempotencyOrphan = errors.New("idempotency record references missing customer")
 var ErrCustomerEmailTaken = errors.New("customer email already exists in tenant/region")
+var ErrAddressIdempotencyOrphan = errors.New("idempotency record references missing address")
 
 func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db, queries: dbsqlc.New(db)}
@@ -222,7 +227,8 @@ ORDER BY is_default_shipping DESC, is_default_billing DESC, updated_at DESC
 	return out, rows.Err()
 }
 
-func (r *Repository) SaveAddress(ctx context.Context, a Address) (Address, error) {
+func (r *Repository) SaveAddress(ctx context.Context, a Address, idempotencyKey string) (Address, error) {
+	key := strings.TrimSpace(idempotencyKey)
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Address{}, err
@@ -230,6 +236,44 @@ func (r *Repository) SaveAddress(ctx context.Context, a Address) (Address, error
 	defer func() {
 		_ = tx.Rollback()
 	}()
+
+	qtx := r.queries.WithTx(tx)
+
+	if key != "" {
+		lockKey := a.TenantID + "\x00" + addressCreateIdempotencyScope(a.CustomerID) + "\x00" + key
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1::text))`, lockKey); err != nil {
+			return Address{}, err
+		}
+		scope := addressCreateIdempotencyScope(a.CustomerID)
+		resourceID, idemErr := qtx.GetIdempotencyResource(ctx, dbsqlc.GetIdempotencyResourceParams{
+			TenantID:       a.TenantID,
+			Scope:          scope,
+			IdempotencyKey: key,
+		})
+		if idemErr == nil && resourceID != "" {
+			row := tx.QueryRowContext(ctx, `
+SELECT id, tenant_id, region_id, customer_id, is_default_shipping, is_default_billing,
+  first_name, last_name, COALESCE(company,''), street_line_1, COALESCE(street_line_2,''), city, postal_code,
+  UPPER(country_code), COALESCE(phone,''), created_at, updated_at
+FROM customer_addresses
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND customer_id = $4
+`, resourceID, a.TenantID, a.RegionID, a.CustomerID)
+			out, scanErr := scanAddressRow(row)
+			if errors.Is(scanErr, sql.ErrNoRows) {
+				return Address{}, fmt.Errorf("%w: %q", ErrAddressIdempotencyOrphan, resourceID)
+			}
+			if scanErr != nil {
+				return Address{}, scanErr
+			}
+			if err := tx.Commit(); err != nil {
+				return Address{}, err
+			}
+			return out, nil
+		}
+		if idemErr != nil && !errors.Is(idemErr, sql.ErrNoRows) {
+			return Address{}, idemErr
+		}
+	}
 
 	if err := lockCustomerTx(ctx, tx, a.TenantID, a.RegionID, a.CustomerID); err != nil {
 		return Address{}, err
@@ -295,6 +339,16 @@ RETURNING id, tenant_id, region_id, customer_id, is_default_shipping, is_default
 			return Address{}, ErrAddressNotFound
 		}
 		return Address{}, scanErr
+	}
+	if key != "" {
+		if err := qtx.SaveIdempotencyResource(ctx, dbsqlc.SaveIdempotencyResourceParams{
+			TenantID:       a.TenantID,
+			Scope:          addressCreateIdempotencyScope(a.CustomerID),
+			IdempotencyKey: key,
+			ResourceID:     out.ID,
+		}); err != nil {
+			return Address{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return Address{}, err

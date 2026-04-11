@@ -21,6 +21,7 @@ type stubRepo struct {
 	saveAddressIn    Address
 	saveAddressOut   Address
 	saveAddressErr   error
+	addressIdem      map[string]Address
 	deleteAddressErr error
 }
 
@@ -59,15 +60,35 @@ func (s *stubRepo) ListAddresses(_ context.Context, _, _, _ string) ([]Address, 
 	return s.listAddressesOut, nil
 }
 
-func (s *stubRepo) SaveAddress(_ context.Context, a Address) (Address, error) {
-	s.saveAddressIn = a
+func (s *stubRepo) SaveAddress(_ context.Context, a Address, idempotencyKey string) (Address, error) {
+	key := strings.TrimSpace(idempotencyKey)
+	if key != "" {
+		sk := a.TenantID + "|" + addressCreateIdempotencyScope(a.CustomerID) + "|" + key
+		if s.addressIdem == nil {
+			s.addressIdem = make(map[string]Address)
+		}
+		if prev, ok := s.addressIdem[sk]; ok {
+			return prev, nil
+		}
+	}
 	if s.saveAddressErr != nil {
 		return Address{}, s.saveAddressErr
 	}
+	s.saveAddressIn = a
+	var out Address
 	if s.saveAddressOut.ID != "" {
-		return s.saveAddressOut, nil
+		out = s.saveAddressOut
+	} else {
+		out = a
 	}
-	return a, nil
+	if key != "" {
+		sk := a.TenantID + "|" + addressCreateIdempotencyScope(a.CustomerID) + "|" + key
+		if s.addressIdem == nil {
+			s.addressIdem = make(map[string]Address)
+		}
+		s.addressIdem[sk] = out
+	}
+	return out, nil
 }
 
 func (s *stubRepo) DeleteAddress(_ context.Context, _, _, _, _ string) error {
@@ -198,10 +219,52 @@ func TestListAddressesMapsCustomerNotFound(t *testing.T) {
 	}
 }
 
+func TestCreateAddressRequiresIdempotencyKey(t *testing.T) {
+	svc := NewService(&stubRepo{})
+	_, err := svc.CreateAddress(context.Background(), "t", "r", "c1", " ", Address{
+		FirstName: "A", LastName: "B", StreetLine1: "1", City: "C", PostalCode: "1", CountryCode: "US",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestCreateAddressIdempotentReplayReturnsFirstAddress(t *testing.T) {
+	repo := &stubRepo{}
+	svc := NewService(repo)
+	first, err := svc.CreateAddress(context.Background(), "t", "r", "c1", "addr-key", Address{
+		ID:          "adr_first",
+		FirstName:   "A",
+		LastName:    "B",
+		StreetLine1: "1",
+		City:        "C",
+		PostalCode:  "1",
+		CountryCode: "US",
+	})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	second, err := svc.CreateAddress(context.Background(), "t", "r", "c1", "addr-key", Address{
+		ID:          "adr_second",
+		FirstName:   "X",
+		LastName:    "Y",
+		StreetLine1: "2",
+		City:        "D",
+		PostalCode:  "2",
+		CountryCode: "CA",
+	})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if first.ID != second.ID || first.FirstName != "A" {
+		t.Fatalf("expected replay of first address, got first=%+v second=%+v", first, second)
+	}
+}
+
 func TestCreateAddressNormalizesAndAssignsID(t *testing.T) {
 	repo := &stubRepo{}
 	svc := NewService(repo)
-	out, err := svc.CreateAddress(context.Background(), "t", "r", "c1", Address{
+	out, err := svc.CreateAddress(context.Background(), "t", "r", "c1", "idem-adr", Address{
 		FirstName:   "  A ",
 		LastName:    "B",
 		StreetLine1: "1 Main",
