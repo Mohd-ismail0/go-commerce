@@ -22,6 +22,7 @@ type fakeRepo struct {
 	updateShippingErr error
 	updatePricingErr  error
 	applyAddrErr      error
+	getSessionErr     error
 }
 
 func (f *fakeRepo) CreateSession(_ context.Context, in Session) (Session, error) {
@@ -36,6 +37,9 @@ func (f *fakeRepo) UpsertLine(_ context.Context, _, _ string, line Line) (Line, 
 }
 
 func (f *fakeRepo) GetSession(_ context.Context, _, _, checkoutID string) (Session, error) {
+	if f.getSessionErr != nil {
+		return Session{}, f.getSessionErr
+	}
 	if f.session.ID == "" {
 		f.session = Session{ID: checkoutID, Status: "open", Currency: "USD"}
 	}
@@ -695,5 +699,91 @@ func TestUpdateSessionContextMapsRepositorySessionNotOpenToConflict(t *testing.T
 	apiErr, ok := err.(sharederrors.APIError)
 	if !ok || apiErr.Status != 409 {
 		t.Fatalf("expected 409 API error, got %#v", err)
+	}
+}
+
+func TestGetSessionRequiresCheckoutID(t *testing.T) {
+	svc := NewService(&fakeRepo{}, events.NewBus(), nil)
+	_, err := svc.GetSession(context.Background(), "t", "r", "  ")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	apiErr, ok := err.(sharederrors.APIError)
+	if !ok || apiErr.Status != 400 {
+		t.Fatalf("expected 400 API error, got %#v", err)
+	}
+}
+
+func TestGetSessionMapsNotFoundToAPI(t *testing.T) {
+	repo := &fakeRepo{getSessionErr: ErrSessionNotFound}
+	svc := NewService(repo, events.NewBus(), nil)
+	_, err := svc.GetSession(context.Background(), "t", "r", "chk_x")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	apiErr, ok := err.(sharederrors.APIError)
+	if !ok || apiErr.Status != 404 {
+		t.Fatalf("expected 404 API error, got %#v", err)
+	}
+}
+
+func TestGetSessionReturnsStoredSession(t *testing.T) {
+	repo := &fakeRepo{
+		session: Session{
+			ID:         "chk_1",
+			Status:     "open",
+			Currency:   "EUR",
+			CustomerID: "cus_9",
+		},
+	}
+	svc := NewService(repo, events.NewBus(), nil)
+	sess, err := svc.GetSession(context.Background(), "tenant_a", "us", "chk_1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sess.CustomerID != "cus_9" || sess.Currency != "EUR" {
+		t.Fatalf("unexpected session: %+v", sess)
+	}
+}
+
+func TestListLinesMapsNotFoundToAPI(t *testing.T) {
+	repo := &fakeRepo{getSessionErr: ErrSessionNotFound}
+	svc := NewService(repo, events.NewBus(), nil)
+	_, err := svc.ListLines(context.Background(), "t", "r", "chk_x")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	apiErr, ok := err.(sharederrors.APIError)
+	if !ok || apiErr.Status != 404 {
+		t.Fatalf("expected 404 API error, got %#v", err)
+	}
+}
+
+func TestListLinesReturnsEmptySliceWhenNoLines(t *testing.T) {
+	repo := &fakeRepo{session: Session{ID: "chk_1", Status: "open", Currency: "USD"}}
+	svc := NewService(repo, events.NewBus(), nil)
+	lines, err := svc.ListLines(context.Background(), "t", "r", "chk_1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if lines == nil || len(lines) != 0 {
+		t.Fatalf("expected empty non-nil slice, got %#v", lines)
+	}
+}
+
+func TestListLinesReturnsItems(t *testing.T) {
+	repo := &fakeRepo{
+		session: Session{ID: "chk_1", Status: "open", Currency: "USD"},
+		lines: []Line{
+			{ID: "ln_1", CheckoutID: "chk_1", ProductID: "p1", Quantity: 2, UnitPriceCents: 500, Currency: "USD"},
+		},
+	}
+	svc := NewService(repo, events.NewBus(), nil)
+	lines, err := svc.ListLines(context.Background(), "t", "r", "chk_1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(lines) != 1 || lines[0].ID != "ln_1" {
+		t.Fatalf("unexpected lines: %#v", lines)
 	}
 }

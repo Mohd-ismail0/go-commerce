@@ -25,6 +25,44 @@ func NewService(repo Repository, bus *events.Bus, calculator PricingCalculator) 
 	return &Service{repo: repo, bus: bus, calculator: calculator}
 }
 
+// GetSession returns the checkout session scoped by tenant and region.
+func (s *Service) GetSession(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error) {
+	checkoutID = strings.TrimSpace(checkoutID)
+	if checkoutID == "" {
+		return Session{}, sharederrors.BadRequest("checkout_id is required")
+	}
+	sess, err := s.repo.GetSession(ctx, tenantID, regionID, checkoutID)
+	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			return Session{}, sharederrors.NotFound(err.Error())
+		}
+		return Session{}, sharederrors.Internal("failed to load checkout session")
+	}
+	return sess, nil
+}
+
+// ListLines returns checkout lines after verifying the session exists for tenant/region (404 when missing).
+func (s *Service) ListLines(ctx context.Context, tenantID, regionID, checkoutID string) ([]Line, error) {
+	checkoutID = strings.TrimSpace(checkoutID)
+	if checkoutID == "" {
+		return nil, sharederrors.BadRequest("checkout_id is required")
+	}
+	if _, err := s.repo.GetSession(ctx, tenantID, regionID, checkoutID); err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			return nil, sharederrors.NotFound(err.Error())
+		}
+		return nil, sharederrors.Internal("failed to load checkout session")
+	}
+	lines, err := s.repo.ListLines(ctx, tenantID, regionID, checkoutID)
+	if err != nil {
+		return nil, sharederrors.Internal("failed to list checkout lines")
+	}
+	if lines == nil {
+		return []Line{}, nil
+	}
+	return lines, nil
+}
+
 func (s *Service) CreateSession(ctx context.Context, in Session) (Session, error) {
 	if strings.TrimSpace(in.CustomerID) == "" || len(strings.TrimSpace(in.Currency)) != 3 {
 		return Session{}, sharederrors.BadRequest("invalid checkout payload")

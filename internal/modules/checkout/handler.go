@@ -20,7 +20,9 @@ func NewHandler(svc *Service) *Handler {
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Route("/checkouts", func(r chi.Router) {
 		r.Post("/sessions", h.createSession)
+		r.Get("/sessions/{checkout_id}", h.getSession)
 		r.Patch("/sessions/{checkout_id}", h.updateSessionContext)
+		r.Get("/sessions/{checkout_id}/lines", h.listLines)
 		r.Put("/sessions/{checkout_id}/lines", h.upsertLine)
 		r.Post("/sessions/{checkout_id}/recalculate", h.recalculate)
 		r.Post("/sessions/{checkout_id}/apply-customer-addresses", h.applyCustomerAddresses)
@@ -74,6 +76,34 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	utils.JSON(w, http.StatusCreated, saved)
+}
+
+func (h *Handler) getSession(w http.ResponseWriter, r *http.Request) {
+	sess, err := h.svc.GetSession(
+		r.Context(),
+		middleware.TenantIDFromContext(r.Context()),
+		middleware.RegionIDFromContext(r.Context()),
+		chi.URLParam(r, "checkout_id"),
+	)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, sess)
+}
+
+func (h *Handler) listLines(w http.ResponseWriter, r *http.Request) {
+	lines, err := h.svc.ListLines(
+		r.Context(),
+		middleware.TenantIDFromContext(r.Context()),
+		middleware.RegionIDFromContext(r.Context()),
+		chi.URLParam(r, "checkout_id"),
+	)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, map[string]any{"items": lines})
 }
 
 func (h *Handler) upsertLine(w http.ResponseWriter, r *http.Request) {

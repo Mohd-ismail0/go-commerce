@@ -460,6 +460,14 @@ components:
         currency:
           type: string
           pattern: "^[A-Z]{3}$"
+    CheckoutLineListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CheckoutLine"
     CheckoutLineInput:
       type: object
       required: [id, quantity, unit_price_cents, currency]
@@ -950,6 +958,36 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
   /checkouts/sessions/{checkout_id}:
+    get:
+      operationId: get_checkouts_sessions_by_checkout_id
+      summary: Get checkout session
+      description: Returns the checkout session row for the tenant/region scope. Use `GET .../lines` for line items.
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: checkout_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Checkout session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutSession"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Checkout not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     patch:
       operationId: patch_checkouts_sessions_by_checkout_id
       summary: Update checkout pricing context
@@ -1039,6 +1077,36 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
   /checkouts/sessions/{checkout_id}/lines:
+    get:
+      operationId: get_checkouts_sessions_by_checkout_id_lines
+      summary: List checkout lines
+      description: Returns line items only if the checkout session exists for the tenant/region (404 otherwise), including when the cart is empty.
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: checkout_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Checkout lines
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutLineListResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Checkout not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     put:
       operationId: put_checkouts_sessions_by_checkout_id_lines
       summary: Upsert checkout line
