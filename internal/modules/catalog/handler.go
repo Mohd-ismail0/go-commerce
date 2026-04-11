@@ -21,13 +21,32 @@ func NewHandler(svc *Service) *Handler {
 }
 
 func (h *Handler) RegisterRoutes(r chi.Router) {
+	r.Route("/product-types", func(r chi.Router) {
+		r.Get("/", h.listProductTypes)
+		r.Post("/", h.createProductType)
+		r.Get("/{productTypeID}", h.getProductTypeDetail)
+		r.Post("/{productTypeID}/attributes", h.linkAttributeToProductType)
+		r.Delete("/{productTypeID}/attributes/{attributeID}", h.unlinkAttributeFromProductType)
+	})
+	r.Route("/attributes", func(r chi.Router) {
+		r.Get("/", h.listCatalogAttributes)
+		r.Post("/", h.createCatalogAttribute)
+	})
 	r.Route("/products", func(r chi.Router) {
 		r.Get("/", h.list)
 		r.Post("/", h.upsert)
+		r.Route("/{productID}/attribute-values", func(r chi.Router) {
+			r.Get("/", h.listProductAttributeValues)
+			r.Put("/", h.putProductAttributeValues)
+		})
 		r.Route("/{productID}/variants", func(r chi.Router) {
 			r.Get("/", h.listVariants)
 			r.Post("/", h.upsertVariant)
 			r.Patch("/", h.upsertVariant)
+			r.Route("/{variantID}/attribute-values", func(r chi.Router) {
+				r.Get("/", h.listVariantAttributeValues)
+				r.Put("/", h.putVariantAttributeValues)
+			})
 		})
 		r.Route("/{productID}/media", func(r chi.Router) {
 			r.Get("/", h.listProductMedia)
@@ -52,6 +71,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	languageCode := strings.TrimSpace(r.URL.Query().Get("language_code"))
 	channelID := strings.TrimSpace(r.URL.Query().Get("channel_id"))
 	publishedOnly := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("published_only")), "true")
+	expandAttributeValues := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("expand")), "attribute_values")
 	limit := int32(20)
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil {
@@ -67,7 +87,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		}
 		cursor = &parsed
 	}
-	items, err := h.svc.List(r.Context(), tenantID, regionID, sku, languageCode, channelID, publishedOnly, cursor, limit)
+	items, err := h.svc.List(r.Context(), tenantID, regionID, sku, languageCode, channelID, publishedOnly, cursor, limit, expandAttributeValues)
 	if err != nil {
 		utils.WriteError(w, err)
 		return
@@ -249,4 +269,166 @@ func (h *Handler) listProductMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	utils.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *Handler) listProductTypes(w http.ResponseWriter, r *http.Request) {
+	tenantID := middleware.TenantIDFromContext(r.Context())
+	regionID := middleware.RegionIDFromContext(r.Context())
+	items, err := h.svc.ListProductTypes(r.Context(), tenantID, regionID)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *Handler) createProductType(w http.ResponseWriter, r *http.Request) {
+	var pt ProductType
+	if err := json.NewDecoder(r.Body).Decode(&pt); err != nil {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
+		return
+	}
+	pt.TenantID = middleware.TenantIDFromContext(r.Context())
+	pt.RegionID = middleware.RegionIDFromContext(r.Context())
+	if pt.ID == "" {
+		pt.ID = utils.NewID("pty")
+	}
+	saved, err := h.svc.SaveProductType(r.Context(), pt)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusCreated, saved)
+}
+
+func (h *Handler) getProductTypeDetail(w http.ResponseWriter, r *http.Request) {
+	tenantID := middleware.TenantIDFromContext(r.Context())
+	regionID := middleware.RegionIDFromContext(r.Context())
+	productTypeID := chi.URLParam(r, "productTypeID")
+	detail, err := h.svc.GetProductTypeDetail(r.Context(), tenantID, regionID, productTypeID)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, detail)
+}
+
+func (h *Handler) linkAttributeToProductType(w http.ResponseWriter, r *http.Request) {
+	var in LinkAttributeToTypeInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
+		return
+	}
+	tenantID := middleware.TenantIDFromContext(r.Context())
+	regionID := middleware.RegionIDFromContext(r.Context())
+	productTypeID := chi.URLParam(r, "productTypeID")
+	if err := h.svc.LinkAttributeToProductType(r.Context(), tenantID, regionID, productTypeID, in); err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusCreated, map[string]any{"linked": true})
+}
+
+func (h *Handler) unlinkAttributeFromProductType(w http.ResponseWriter, r *http.Request) {
+	tenantID := middleware.TenantIDFromContext(r.Context())
+	regionID := middleware.RegionIDFromContext(r.Context())
+	productTypeID := chi.URLParam(r, "productTypeID")
+	attributeID := chi.URLParam(r, "attributeID")
+	if err := h.svc.UnlinkAttributeFromProductType(r.Context(), tenantID, regionID, productTypeID, attributeID); err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) listCatalogAttributes(w http.ResponseWriter, r *http.Request) {
+	tenantID := middleware.TenantIDFromContext(r.Context())
+	regionID := middleware.RegionIDFromContext(r.Context())
+	items, err := h.svc.ListCatalogAttributes(r.Context(), tenantID, regionID)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *Handler) createCatalogAttribute(w http.ResponseWriter, r *http.Request) {
+	var a CatalogAttribute
+	if err := json.NewDecoder(r.Body).Decode(&a); err != nil {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
+		return
+	}
+	a.TenantID = middleware.TenantIDFromContext(r.Context())
+	a.RegionID = middleware.RegionIDFromContext(r.Context())
+	if a.ID == "" {
+		a.ID = utils.NewID("atr")
+	}
+	saved, err := h.svc.SaveCatalogAttribute(r.Context(), a)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusCreated, saved)
+}
+
+func (h *Handler) listProductAttributeValues(w http.ResponseWriter, r *http.Request) {
+	tenantID := middleware.TenantIDFromContext(r.Context())
+	regionID := middleware.RegionIDFromContext(r.Context())
+	productID := chi.URLParam(r, "productID")
+	items, err := h.svc.ListProductAttributeValues(r.Context(), tenantID, regionID, productID)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, map[string]any{"values": items})
+}
+
+func (h *Handler) putProductAttributeValues(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Values []AttributeValuePair `json:"values"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
+		return
+	}
+	tenantID := middleware.TenantIDFromContext(r.Context())
+	regionID := middleware.RegionIDFromContext(r.Context())
+	productID := chi.URLParam(r, "productID")
+	if err := h.svc.SetProductAttributeValues(r.Context(), tenantID, regionID, productID, body.Values); err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) listVariantAttributeValues(w http.ResponseWriter, r *http.Request) {
+	tenantID := middleware.TenantIDFromContext(r.Context())
+	regionID := middleware.RegionIDFromContext(r.Context())
+	productID := chi.URLParam(r, "productID")
+	variantID := chi.URLParam(r, "variantID")
+	items, err := h.svc.ListVariantAttributeValues(r.Context(), tenantID, regionID, productID, variantID)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, map[string]any{"values": items})
+}
+
+func (h *Handler) putVariantAttributeValues(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Values []AttributeValuePair `json:"values"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
+		return
+	}
+	tenantID := middleware.TenantIDFromContext(r.Context())
+	regionID := middleware.RegionIDFromContext(r.Context())
+	productID := chi.URLParam(r, "productID")
+	variantID := chi.URLParam(r, "variantID")
+	if err := h.svc.SetVariantAttributeValues(r.Context(), tenantID, regionID, productID, variantID, body.Values); err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }

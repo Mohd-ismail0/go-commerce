@@ -34,6 +34,19 @@ type Brand struct {
 	UpdatedAt       time.Time
 }
 
+type CatalogAttribute struct {
+	ID            string
+	TenantID      string
+	RegionID      string
+	Name          string
+	Slug          string
+	InputType     string
+	Unit          sql.NullString
+	AllowedValues pqtype.NullRawMessage
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 type Category struct {
 	ID        string
 	TenantID  string
@@ -81,6 +94,26 @@ type Customer struct {
 	Name      string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+type CustomerAddress struct {
+	ID                string
+	TenantID          string
+	RegionID          string
+	CustomerID        string
+	IsDefaultShipping bool
+	IsDefaultBilling  bool
+	FirstName         string
+	LastName          string
+	Company           sql.NullString
+	StreetLine1       string
+	StreetLine2       sql.NullString
+	City              string
+	PostalCode        string
+	CountryCode       string
+	Phone             sql.NullString
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 type IdempotencyKey struct {
@@ -168,8 +201,17 @@ type Product struct {
 	ExternalReference sql.NullString
 	Currency          string
 	PriceCents        int64
+	ProductTypeID     sql.NullString
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+}
+
+type ProductAttributeValue struct {
+	ProductID   string
+	AttributeID string
+	ValueText   string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type ProductChannelListing struct {
@@ -194,6 +236,23 @@ type ProductMedium struct {
 	MediaType string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+type ProductType struct {
+	ID        string
+	TenantID  string
+	RegionID  string
+	Name      string
+	Slug      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type ProductTypeAttribute struct {
+	ProductTypeID string
+	AttributeID   string
+	SortOrder     int32
+	VariantOnly   bool
 }
 
 type ProductVariant struct {
@@ -251,6 +310,14 @@ type Translation struct {
 	Fields       json.RawMessage
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+}
+
+type VariantAttributeValue struct {
+	VariantID   string
+	AttributeID string
+	ValueText   string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type VariantChannelListing struct {

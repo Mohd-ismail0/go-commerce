@@ -129,6 +129,100 @@ components:
         created_at:
           type: string
           format: date-time
+        product_type_id:
+          type: string
+          description: Optional link to a tenant/region product type defining assignable attributes.
+        attribute_values:
+          type: array
+          description: Present when listing with expand=attribute_values.
+          items:
+            $ref: "#/components/schemas/AttributeValuePair"
+    AttributeValuePair:
+      type: object
+      required: [attribute_id, value]
+      properties:
+        attribute_id: { type: string }
+        value: { type: string }
+    ProductType:
+      type: object
+      required: [id, tenant_id, region_id, name, slug]
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        region_id: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        created_at: { type: string, format: date-time }
+    ProductTypeInput:
+      type: object
+      required: [name, slug]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        slug: { type: string }
+    ProductTypeAttributeDef:
+      type: object
+      properties:
+        attribute_id: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        input_type: { type: string, enum: [text, number, boolean, select] }
+        unit: { type: string }
+        sort_order: { type: integer }
+        variant_only: { type: boolean }
+        allowed_values:
+          description: JSON array of allowed strings when input_type is select.
+          nullable: true
+    ProductTypeDetail:
+      allOf:
+        - $ref: "#/components/schemas/ProductType"
+        - type: object
+          properties:
+            attributes:
+              type: array
+              items:
+                $ref: "#/components/schemas/ProductTypeAttributeDef"
+    CatalogAttribute:
+      type: object
+      required: [id, tenant_id, region_id, name, slug, input_type]
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        region_id: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        input_type: { type: string, enum: [text, number, boolean, select] }
+        unit: { type: string }
+        allowed_values:
+          description: Required for select — JSON array of strings.
+          nullable: true
+        created_at: { type: string, format: date-time }
+    CatalogAttributeInput:
+      type: object
+      required: [name, slug, input_type]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        input_type: { type: string, enum: [text, number, boolean, select] }
+        unit: { type: string }
+        allowed_values:
+          description: JSON array of strings when input_type is select.
+          nullable: true
+    LinkAttributeToTypeInput:
+      type: object
+      required: [attribute_id]
+      properties:
+        attribute_id: { type: string }
+        sort_order: { type: integer, default: 0 }
+        variant_only: { type: boolean, default: false }
+    AttributeValuesPutBody:
+      type: object
+      properties:
+        values:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttributeValuePair"
     ProductInput:
       type: object
       required: [sku, name, currency, price_cents]
@@ -163,6 +257,9 @@ components:
           type: integer
           format: int64
           minimum: 1
+        product_type_id:
+          type: string
+          description: Optional; must reference an existing product type in the same tenant and region.
     ProductVariant:
       type: object
       required: [id, tenant_id, region_id, product_id, sku, name, currency, price_cents]
@@ -891,6 +988,12 @@ paths:
           description: When true with channel_id, only published channel listings are returned.
           schema:
             type: boolean
+        - in: query
+          name: expand
+          description: Set to `attribute_values` to include per-product attribute values on each list item.
+          schema:
+            type: string
+            enum: [attribute_values]
       responses:
         "200":
           description: Product list
@@ -1984,6 +2087,288 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProductMedia"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /product-types:
+    get:
+      operationId: get_product_types
+      summary: List product types
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Product types
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ItemsResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/ProductType"
+    post:
+      operationId: post_product_types
+      summary: Create product type
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductTypeInput"
+      responses:
+        "201":
+          description: Product type created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductType"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /product-types/{product_type_id}:
+    get:
+      operationId: get_product_types_by_id
+      summary: Get product type with attribute schema
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: product_type_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Product type detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductTypeDetail"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /product-types/{product_type_id}/attributes:
+    post:
+      operationId: post_product_types_attributes
+      summary: Assign catalog attribute to product type
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: product_type_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinkAttributeToTypeInput"
+      responses:
+        "201":
+          description: Linked
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /product-types/{product_type_id}/attributes/{attribute_id}:
+    delete:
+      operationId: delete_product_types_attributes
+      summary: Remove attribute from product type (clears stored values for that attribute on products of this type)
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: product_type_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: attribute_id
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Unlinked
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /attributes:
+    get:
+      operationId: get_catalog_attributes
+      summary: List catalog attributes
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Attributes
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ItemsResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/CatalogAttribute"
+    post:
+      operationId: post_catalog_attributes
+      summary: Create catalog attribute
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CatalogAttributeInput"
+      responses:
+        "201":
+          description: Attribute created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogAttribute"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /products/{product_id}/attribute-values:
+    get:
+      operationId: get_products_attribute_values
+      summary: List product-level attribute values
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: product_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Values
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  values:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AttributeValuePair"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: put_products_attribute_values
+      summary: Upsert product-level attribute values (non variant_only attributes)
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: product_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttributeValuesPutBody"
+      responses:
+        "200":
+          description: Updated
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /products/{product_id}/variants/{variant_id}/attribute-values:
+    get:
+      operationId: get_variants_attribute_values
+      summary: List variant-level attribute values
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: product_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: variant_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Values
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  values:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AttributeValuePair"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: put_variants_attribute_values
+      summary: Upsert variant_only attribute values
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: product_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: variant_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttributeValuesPutBody"
+      responses:
+        "200":
+          description: Updated
         "400":
           description: Bad request
           content:

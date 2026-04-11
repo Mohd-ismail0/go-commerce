@@ -45,7 +45,7 @@ func (q *Queries) AssignProductToCollection(ctx context.Context, arg AssignProdu
 }
 
 const getProductByID = `-- name: GetProductByID :one
-SELECT id, tenant_id, region_id, sku, name, slug, description, seo_title, seo_description, metadata, external_reference, currency, price_cents, created_at, updated_at
+SELECT id, tenant_id, region_id, sku, name, slug, description, seo_title, seo_description, metadata, external_reference, currency, price_cents, product_type_id, created_at, updated_at
 FROM products
 WHERE id = $1 AND tenant_id = $2
 `
@@ -72,6 +72,7 @@ func (q *Queries) GetProductByID(ctx context.Context, arg GetProductByIDParams) 
 		&i.ExternalReference,
 		&i.Currency,
 		&i.PriceCents,
+		&i.ProductTypeID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -371,7 +372,7 @@ func (q *Queries) ListProductVariantsByProduct(ctx context.Context, arg ListProd
 }
 
 const listProductsByTenantRegion = `-- name: ListProductsByTenantRegion :many
-SELECT id, tenant_id, region_id, sku, name, slug, description, seo_title, seo_description, metadata, external_reference, currency, price_cents, created_at, updated_at
+SELECT id, tenant_id, region_id, sku, name, slug, description, seo_title, seo_description, metadata, external_reference, currency, price_cents, product_type_id, created_at, updated_at
 FROM products
 WHERE tenant_id = $1
   AND ($2::text = '' OR region_id = $2)
@@ -418,6 +419,7 @@ func (q *Queries) ListProductsByTenantRegion(ctx context.Context, arg ListProduc
 			&i.ExternalReference,
 			&i.Currency,
 			&i.PriceCents,
+			&i.ProductTypeID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -466,10 +468,10 @@ func (q *Queries) SkuExistsInTenantRegion(ctx context.Context, arg SkuExistsInTe
 
 const upsertProduct = `-- name: UpsertProduct :one
 INSERT INTO products (
-  id, tenant_id, region_id, sku, name, slug, description, seo_title, seo_description, metadata, external_reference, currency, price_cents, created_at, updated_at
+  id, tenant_id, region_id, sku, name, slug, description, seo_title, seo_description, metadata, external_reference, currency, price_cents, product_type_id, created_at, updated_at
 )
 VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW()
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW()
 )
 ON CONFLICT (id) DO UPDATE SET
   tenant_id = EXCLUDED.tenant_id,
@@ -484,8 +486,9 @@ ON CONFLICT (id) DO UPDATE SET
   external_reference = EXCLUDED.external_reference,
   currency = EXCLUDED.currency,
   price_cents = EXCLUDED.price_cents,
+  product_type_id = EXCLUDED.product_type_id,
   updated_at = NOW()
-RETURNING id, tenant_id, region_id, sku, name, slug, description, seo_title, seo_description, metadata, external_reference, currency, price_cents, created_at, updated_at
+RETURNING id, tenant_id, region_id, sku, name, slug, description, seo_title, seo_description, metadata, external_reference, currency, price_cents, product_type_id, created_at, updated_at
 `
 
 type UpsertProductParams struct {
@@ -502,6 +505,7 @@ type UpsertProductParams struct {
 	ExternalReference sql.NullString
 	Currency          string
 	PriceCents        int64
+	ProductTypeID     sql.NullString
 }
 
 func (q *Queries) UpsertProduct(ctx context.Context, arg UpsertProductParams) (Product, error) {
@@ -519,6 +523,7 @@ func (q *Queries) UpsertProduct(ctx context.Context, arg UpsertProductParams) (P
 		arg.ExternalReference,
 		arg.Currency,
 		arg.PriceCents,
+		arg.ProductTypeID,
 	)
 	var i Product
 	err := row.Scan(
@@ -535,6 +540,7 @@ func (q *Queries) UpsertProduct(ctx context.Context, arg UpsertProductParams) (P
 		&i.ExternalReference,
 		&i.Currency,
 		&i.PriceCents,
+		&i.ProductTypeID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

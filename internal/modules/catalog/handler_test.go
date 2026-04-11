@@ -3,6 +3,7 @@ package catalog
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +29,16 @@ type catalogFakeRepo struct {
 	assignErr              error
 	productChannelFilter   map[string][]string
 	variantChannelFilter   map[string][]string
+	productTypes           []ProductType
+	catalogAttrs           []CatalogAttribute
+	typeAttrLinks          map[string]map[string]linkStub
+	productAttrVals        map[string][]AttributeValuePair
+	variantAttrVals        map[string][]AttributeValuePair
+}
+
+type linkStub struct {
+	sortOrder   int
+	variantOnly bool
 }
 
 func TestProductsCreateRequiresIdempotencyKey(t *testing.T) {
@@ -255,6 +266,190 @@ func (r *catalogFakeRepo) ListProductMedia(_ context.Context, tenantID, regionID
 		}
 	}
 	return out, nil
+}
+
+func (r *catalogFakeRepo) InsertProductType(_ context.Context, pt ProductType) (ProductType, error) {
+	r.productTypes = append(r.productTypes, pt)
+	return pt, nil
+}
+
+func (r *catalogFakeRepo) ListProductTypes(_ context.Context, tenantID, regionID string) ([]ProductType, error) {
+	out := []ProductType{}
+	for _, pt := range r.productTypes {
+		if pt.TenantID == tenantID && pt.RegionID == regionID {
+			out = append(out, pt)
+		}
+	}
+	return out, nil
+}
+
+func (r *catalogFakeRepo) GetProductType(_ context.Context, tenantID, regionID, id string) (ProductType, error) {
+	for _, pt := range r.productTypes {
+		if pt.ID == id && pt.TenantID == tenantID && pt.RegionID == regionID {
+			return pt, nil
+		}
+	}
+	return ProductType{}, sql.ErrNoRows
+}
+
+func (r *catalogFakeRepo) ListProductTypeAttributeDefs(_ context.Context, tenantID, regionID, productTypeID string) ([]ProductTypeAttributeDef, error) {
+	if r.typeAttrLinks == nil || r.typeAttrLinks[productTypeID] == nil {
+		return nil, nil
+	}
+	out := []ProductTypeAttributeDef{}
+	for attrID, st := range r.typeAttrLinks[productTypeID] {
+		var ca CatalogAttribute
+		for _, a := range r.catalogAttrs {
+			if a.ID == attrID && a.TenantID == tenantID && a.RegionID == regionID {
+				ca = a
+				break
+			}
+		}
+		out = append(out, ProductTypeAttributeDef{
+			AttributeID:   attrID,
+			Name:          ca.Name,
+			Slug:          ca.Slug,
+			InputType:     ca.InputType,
+			Unit:          ca.Unit,
+			SortOrder:     st.sortOrder,
+			VariantOnly:   st.variantOnly,
+			AllowedValues: ca.AllowedValues,
+		})
+	}
+	return out, nil
+}
+
+func (r *catalogFakeRepo) InsertCatalogAttribute(_ context.Context, a CatalogAttribute) (CatalogAttribute, error) {
+	r.catalogAttrs = append(r.catalogAttrs, a)
+	return a, nil
+}
+
+func (r *catalogFakeRepo) ListCatalogAttributes(_ context.Context, tenantID, regionID string) ([]CatalogAttribute, error) {
+	out := []CatalogAttribute{}
+	for _, a := range r.catalogAttrs {
+		if a.TenantID == tenantID && a.RegionID == regionID {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (r *catalogFakeRepo) GetCatalogAttribute(_ context.Context, tenantID, regionID, id string) (CatalogAttribute, error) {
+	for _, a := range r.catalogAttrs {
+		if a.ID == id && a.TenantID == tenantID && a.RegionID == regionID {
+			return a, nil
+		}
+	}
+	return CatalogAttribute{}, sql.ErrNoRows
+}
+
+func (r *catalogFakeRepo) LinkAttributeToProductType(_ context.Context, productTypeID string, in LinkAttributeToTypeInput) error {
+	if r.typeAttrLinks == nil {
+		r.typeAttrLinks = map[string]map[string]linkStub{}
+	}
+	if r.typeAttrLinks[productTypeID] == nil {
+		r.typeAttrLinks[productTypeID] = map[string]linkStub{}
+	}
+	r.typeAttrLinks[productTypeID][in.AttributeID] = linkStub{sortOrder: in.SortOrder, variantOnly: in.VariantOnly}
+	return nil
+}
+
+func (r *catalogFakeRepo) UnlinkAttributeFromProductType(_ context.Context, tenantID, regionID, productTypeID, attributeID string) error {
+	found := false
+	for _, pt := range r.productTypes {
+		if pt.ID == productTypeID && pt.TenantID == tenantID && pt.RegionID == regionID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return sql.ErrNoRows
+	}
+	if r.typeAttrLinks != nil && r.typeAttrLinks[productTypeID] != nil {
+		delete(r.typeAttrLinks[productTypeID], attributeID)
+	}
+	return nil
+}
+
+func (r *catalogFakeRepo) ListProductAttributeValues(_ context.Context, productID string) ([]AttributeValuePair, error) {
+	if r.productAttrVals == nil {
+		return nil, nil
+	}
+	return r.productAttrVals[productID], nil
+}
+
+func (r *catalogFakeRepo) ListVariantAttributeValues(_ context.Context, variantID string) ([]AttributeValuePair, error) {
+	if r.variantAttrVals == nil {
+		return nil, nil
+	}
+	return r.variantAttrVals[variantID], nil
+}
+
+func (r *catalogFakeRepo) ListProductAttributeValuesForProducts(_ context.Context, productIDs []string) (map[string][]AttributeValuePair, error) {
+	out := map[string][]AttributeValuePair{}
+	if r.productAttrVals == nil {
+		return out, nil
+	}
+	for _, id := range productIDs {
+		if v, ok := r.productAttrVals[id]; ok {
+			out[id] = v
+		}
+	}
+	return out, nil
+}
+
+func (r *catalogFakeRepo) SetProductAttributeValues(_ context.Context, productID string, pairs []AttributeValuePair) error {
+	if r.productAttrVals == nil {
+		r.productAttrVals = map[string][]AttributeValuePair{}
+	}
+	if len(pairs) == 0 {
+		return nil
+	}
+	r.productAttrVals[productID] = append([]AttributeValuePair(nil), pairs...)
+	return nil
+}
+
+func (r *catalogFakeRepo) SetVariantAttributeValues(_ context.Context, variantID string, pairs []AttributeValuePair) error {
+	if r.variantAttrVals == nil {
+		r.variantAttrVals = map[string][]AttributeValuePair{}
+	}
+	if len(pairs) == 0 {
+		return nil
+	}
+	r.variantAttrVals[variantID] = append([]AttributeValuePair(nil), pairs...)
+	return nil
+}
+
+func (r *catalogFakeRepo) GetProductRegionAndType(_ context.Context, tenantID, productID string) (regionID string, productTypeID string, hasType bool, err error) {
+	for _, p := range r.items {
+		if p.ID == productID && p.TenantID == tenantID {
+			if strings.TrimSpace(p.ProductTypeID) != "" {
+				return p.RegionID, p.ProductTypeID, true, nil
+			}
+			return p.RegionID, "", false, nil
+		}
+	}
+	return "", "", false, sql.ErrNoRows
+}
+
+func (r *catalogFakeRepo) GetVariantProductRegion(_ context.Context, tenantID, variantID string) (productID, regionID string, err error) {
+	for _, v := range r.variants {
+		if v.ID == variantID && v.TenantID == tenantID {
+			return v.ProductID, v.RegionID, nil
+		}
+	}
+	return "", "", sql.ErrNoRows
+}
+
+func (r *catalogFakeRepo) GetProductTypeAttributeVariantOnly(_ context.Context, productTypeID, attributeID, _, _ string) (bool, error) {
+	if r.typeAttrLinks == nil || r.typeAttrLinks[productTypeID] == nil {
+		return false, sql.ErrNoRows
+	}
+	st, ok := r.typeAttrLinks[productTypeID][attributeID]
+	if !ok {
+		return false, sql.ErrNoRows
+	}
+	return st.variantOnly, nil
 }
 
 func TestProductsListIsTenantScoped(t *testing.T) {
