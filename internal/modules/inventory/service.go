@@ -2,8 +2,11 @@ package inventory
 
 import (
 	"context"
+	"strings"
 
+	sharederrors "rewrite/internal/shared/errors"
 	"rewrite/internal/shared/events"
+	"rewrite/internal/shared/utils"
 )
 
 type Service struct {
@@ -23,4 +26,23 @@ func (s *Service) Save(ctx context.Context, item StockItem) StockItem {
 
 func (s *Service) List(_ context.Context, tenantID string) []StockItem {
 	return s.repo.List(tenantID)
+}
+
+func (s *Service) ListWarehouses(ctx context.Context, tenantID, regionID string) ([]Warehouse, error) {
+	return s.repo.ListWarehouses(ctx, tenantID, regionID)
+}
+
+func (s *Service) SaveWarehouse(ctx context.Context, w Warehouse) (Warehouse, error) {
+	if strings.TrimSpace(w.Name) == "" || strings.TrimSpace(w.Code) == "" {
+		return Warehouse{}, sharederrors.BadRequest("warehouse name and code are required")
+	}
+	if w.ID == "" {
+		w.ID = utils.NewID("wh")
+	}
+	saved, err := s.repo.SaveWarehouse(ctx, w)
+	if err != nil {
+		return Warehouse{}, sharederrors.Internal("failed to save warehouse")
+	}
+	s.bus.Publish(ctx, events.EventInventoryChange, saved)
+	return saved, nil
 }

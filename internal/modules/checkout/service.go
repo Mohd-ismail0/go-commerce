@@ -25,6 +25,105 @@ func NewService(repo Repository, bus *events.Bus, calculator PricingCalculator) 
 }
 
 // GetSession returns the checkout session scoped by tenant and region.
+// ValidateCheckout returns aggregated readiness problems (read-only; does not mutate totals).
+func (s *Service) ValidateCheckout(ctx context.Context, tenantID, regionID, checkoutID string) (CheckoutValidationReport, error) {
+	checkoutID = strings.TrimSpace(checkoutID)
+	if checkoutID == "" {
+		return CheckoutValidationReport{}, sharederrors.BadRequest("checkout_id is required")
+	}
+	sess, err := s.repo.GetSession(ctx, tenantID, regionID, checkoutID)
+	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			return CheckoutValidationReport{}, sharederrors.NotFound(err.Error())
+		}
+		return CheckoutValidationReport{}, sharederrors.Internal("failed to load checkout session")
+	}
+	report := CheckoutValidationReport{CheckoutID: checkoutID, Problems: []CheckoutProblem{}}
+	if !strings.EqualFold(strings.TrimSpace(sess.Status), "open") {
+		report.Problems = append(report.Problems, CheckoutProblem{
+			Code: "session_not_open", Message: "checkout session is not open", Severity: "error",
+		})
+		return report, nil
+	}
+	lines, err := s.repo.ListLines(ctx, tenantID, regionID, checkoutID)
+	if err != nil {
+		return CheckoutValidationReport{}, sharederrors.Internal("failed to load checkout lines")
+	}
+	if len(lines) == 0 {
+		report.Problems = append(report.Problems, CheckoutProblem{
+			Code: "empty_cart", Message: "checkout has no line items", Severity: "warning",
+		})
+	}
+	if len(lines) > 0 {
+		if strings.TrimSpace(sess.ShippingMethodID) == "" {
+			report.Problems = append(report.Problems, CheckoutProblem{
+				Code: "shipping_method_required", Message: "shipping_method_id is required before completion", Severity: "error",
+			})
+		}
+		if strings.TrimSpace(sess.ShippingAddressCountry) == "" {
+			report.Problems = append(report.Problems, CheckoutProblem{
+				Code: "shipping_address_required", Message: "shipping_address_country is required before completion", Severity: "error",
+			})
+		}
+		covered, err := s.repo.HasAuthorizedPaymentCoverage(ctx, tenantID, regionID, checkoutID, sess.TotalCents)
+		if err != nil {
+			return CheckoutValidationReport{}, sharederrors.Internal("failed to validate payment coverage")
+		}
+		if !covered {
+			report.Problems = append(report.Problems, CheckoutProblem{
+				Code: "payment_coverage_required", Message: "authorized payment coverage is required before completion", Severity: "error",
+			})
+		}
+		if ch := strings.TrimSpace(sess.ChannelID); ch != "" {
+			active, err := s.repo.ChannelIsActive(ctx, tenantID, regionID, ch)
+			if err != nil {
+				return CheckoutValidationReport{}, sharederrors.Internal("failed to validate channel")
+			}
+			if !active {
+				report.Problems = append(report.Problems, CheckoutProblem{
+					Code: "channel_inactive", Message: "checkout channel is not active", Severity: "error",
+				})
+			} else {
+				for _, line := range lines {
+					if strings.TrimSpace(line.VariantID) != "" {
+						priceCents, currency, isPublished, found, getErr := s.repo.GetVariantChannelListing(ctx, tenantID, regionID, ch, line.VariantID)
+						if getErr != nil {
+							return CheckoutValidationReport{}, sharederrors.Internal("failed to validate channel variant listing")
+						}
+						if !found || !isPublished || line.UnitPriceCents != priceCents || !strings.EqualFold(strings.TrimSpace(line.Currency), strings.TrimSpace(currency)) {
+							report.Problems = append(report.Problems, CheckoutProblem{
+								Code: "variant_listing_mismatch", Message: "a variant line does not match channel listing", Severity: "error",
+							})
+						}
+						continue
+					}
+					if strings.TrimSpace(line.ProductID) != "" {
+						isPublished, found, getErr := s.repo.GetProductChannelListing(ctx, tenantID, regionID, ch, line.ProductID)
+						if getErr != nil {
+							return CheckoutValidationReport{}, sharederrors.Internal("failed to validate channel product listing")
+						}
+						if !found || !isPublished {
+							report.Problems = append(report.Problems, CheckoutProblem{
+								Code: "product_listing_mismatch", Message: "a product line is not published in checkout channel", Severity: "error",
+							})
+						}
+					}
+				}
+			}
+		}
+		if err := s.repo.ValidateCheckoutStock(ctx, tenantID, regionID, checkoutID); err != nil {
+			if errors.Is(err, ErrInsufficientStock) {
+				report.Problems = append(report.Problems, CheckoutProblem{
+					Code: "insufficient_stock", Message: err.Error(), Severity: "error",
+				})
+			} else {
+				return CheckoutValidationReport{}, sharederrors.Internal("failed to validate stock")
+			}
+		}
+	}
+	return report, nil
+}
+
 func (s *Service) GetSession(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error) {
 	checkoutID = strings.TrimSpace(checkoutID)
 	if checkoutID == "" {

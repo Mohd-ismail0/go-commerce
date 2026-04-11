@@ -1,6 +1,9 @@
 package inventory
 
-import "database/sql"
+import (
+	"context"
+	"database/sql"
+)
 
 type Repository struct {
 	db *sql.DB
@@ -45,4 +48,47 @@ WHERE tenant_id = $1 ORDER BY created_at DESC
 		}
 	}
 	return out
+}
+
+func (r *Repository) ListWarehouses(ctx context.Context, tenantID, regionID string) ([]Warehouse, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT id, tenant_id, region_id, name, code, is_active
+FROM warehouses WHERE tenant_id = $1 AND region_id = $2 ORDER BY name ASC
+`, tenantID, regionID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Warehouse
+	for rows.Next() {
+		var w Warehouse
+		if err := rows.Scan(&w.ID, &w.TenantID, &w.RegionID, &w.Name, &w.Code, &w.IsActive); err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) SaveWarehouse(ctx context.Context, w Warehouse) (Warehouse, error) {
+	_, err := r.db.ExecContext(ctx, `
+INSERT INTO warehouses (id, tenant_id, region_id, name, code, is_active, created_at, updated_at)
+VALUES ($1,$2,$3,$4,$5,$6,NOW(),NOW())
+ON CONFLICT (id) DO UPDATE SET
+name = EXCLUDED.name,
+code = EXCLUDED.code,
+is_active = EXCLUDED.is_active,
+updated_at = NOW()
+`, w.ID, w.TenantID, w.RegionID, w.Name, w.Code, w.IsActive)
+	if err != nil {
+		return Warehouse{}, err
+	}
+	row := r.db.QueryRowContext(ctx, `
+SELECT id, tenant_id, region_id, name, code, is_active FROM warehouses WHERE tenant_id = $1 AND id = $2
+`, w.TenantID, w.ID)
+	var out Warehouse
+	if err := row.Scan(&out.ID, &out.TenantID, &out.RegionID, &out.Name, &out.Code, &out.IsActive); err != nil {
+		return Warehouse{}, err
+	}
+	return out, nil
 }

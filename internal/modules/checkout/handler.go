@@ -21,6 +21,7 @@ func NewHandler(svc *Service) *Handler {
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Route("/checkouts", func(r chi.Router) {
 		r.Post("/sessions", h.createSession)
+		r.Get("/sessions/{checkout_id}/validation", h.getCheckoutValidation)
 		r.Get("/sessions/{checkout_id}", h.getSession)
 		r.Patch("/sessions/{checkout_id}", h.updateSessionContext)
 		r.Get("/sessions/{checkout_id}/lines", h.listLines)
@@ -82,6 +83,20 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	utils.JSON(w, http.StatusCreated, saved)
+}
+
+func (h *Handler) getCheckoutValidation(w http.ResponseWriter, r *http.Request) {
+	rep, err := h.svc.ValidateCheckout(
+		r.Context(),
+		middleware.TenantIDFromContext(r.Context()),
+		middleware.RegionIDFromContext(r.Context()),
+		chi.URLParam(r, "checkout_id"),
+	)
+	if err != nil {
+		utils.WriteError(w, err)
+		return
+	}
+	utils.JSON(w, http.StatusOK, rep)
 }
 
 func (h *Handler) getSession(w http.ResponseWriter, r *http.Request) {

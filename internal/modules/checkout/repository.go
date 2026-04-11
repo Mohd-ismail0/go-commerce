@@ -79,6 +79,7 @@ type Repository interface {
 	ResolveShippingMethodPrice(ctx context.Context, tenantID, regionID, shippingMethodID, countryCode, channelID, postalCode, currency string, subtotalCents int64) (int64, bool, error)
 	UpdateShippingCents(ctx context.Context, tenantID, regionID, checkoutID string, shippingCents int64) (Session, error)
 	HasAuthorizedPaymentCoverage(ctx context.Context, tenantID, regionID, checkoutID string, requiredTotalCents int64) (bool, error)
+	ValidateCheckoutStock(ctx context.Context, tenantID, regionID, checkoutID string) error
 	Recalculate(ctx context.Context, tenantID, regionID, checkoutID string, opts *RecalculateOptions, idempotencyKey string) (Session, error)
 	UpdatePricing(ctx context.Context, tenantID, regionID, checkoutID string, taxCents, totalCents int64) (Session, error)
 	Complete(ctx context.Context, tenantID, regionID, checkoutID, idempotencyKey string) (CompleteOutcome, error)
@@ -1342,6 +1343,79 @@ LIMIT 1
 		}
 	}
 	return "", ErrInsufficientStock
+}
+
+func resolveStockItemIDDB(ctx context.Context, db *sql.DB, tenantID, regionID string, line Line) (string, error) {
+	var stockItemID string
+	if line.VariantID != "" {
+		row := db.QueryRowContext(ctx, `
+SELECT s.id
+FROM stock_items s
+LEFT JOIN warehouses w ON w.id = s.warehouse_id AND w.tenant_id = s.tenant_id AND w.region_id = s.region_id
+WHERE s.tenant_id = $1 AND s.region_id = $2 AND s.variant_id = $3
+  AND (s.warehouse_id IS NULL OR COALESCE(w.is_active, FALSE) = TRUE)
+ORDER BY s.quantity DESC, s.updated_at ASC
+LIMIT 1
+`, tenantID, regionID, line.VariantID)
+		if err := row.Scan(&stockItemID); err == nil {
+			return stockItemID, nil
+		}
+	}
+	if line.ProductID != "" {
+		row := db.QueryRowContext(ctx, `
+SELECT s.id
+FROM stock_items s
+LEFT JOIN warehouses w ON w.id = s.warehouse_id AND w.tenant_id = s.tenant_id AND w.region_id = s.region_id
+WHERE s.tenant_id = $1 AND s.region_id = $2 AND s.product_id = $3 AND (s.variant_id IS NULL OR s.variant_id = '')
+  AND (s.warehouse_id IS NULL OR COALESCE(w.is_active, FALSE) = TRUE)
+ORDER BY s.quantity DESC, s.updated_at ASC
+LIMIT 1
+`, tenantID, regionID, line.ProductID)
+		if err := row.Scan(&stockItemID); err == nil {
+			return stockItemID, nil
+		}
+	}
+	return "", ErrInsufficientStock
+}
+
+func (r *PostgresRepository) ValidateCheckoutStock(ctx context.Context, tenantID, regionID, checkoutID string) error {
+	lines, err := r.ListLines(ctx, tenantID, regionID, checkoutID)
+	if err != nil {
+		return err
+	}
+	requiredByStockItem := map[string]int64{}
+	for _, l := range lines {
+		sid, resErr := resolveStockItemIDDB(ctx, r.db, tenantID, regionID, l)
+		if resErr != nil {
+			return resErr
+		}
+		requiredByStockItem[sid] += l.Quantity
+	}
+	for stockItemID, required := range requiredByStockItem {
+		var onHand int64
+		if err := r.db.QueryRowContext(ctx, `
+SELECT quantity FROM stock_items WHERE tenant_id = $1 AND region_id = $2 AND id = $3
+`, tenantID, regionID, stockItemID).Scan(&onHand); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrInsufficientStock
+			}
+			return err
+		}
+		var othersReserved int64
+		if err := r.db.QueryRowContext(ctx, `
+SELECT COALESCE(SUM(quantity), 0)
+FROM stock_reservations
+WHERE tenant_id = $1 AND region_id = $2 AND stock_item_id = $3
+  AND checkout_id <> $4
+  AND expires_at > NOW()
+`, tenantID, regionID, stockItemID, checkoutID).Scan(&othersReserved); err != nil {
+			return err
+		}
+		if onHand < othersReserved+required {
+			return ErrInsufficientStock
+		}
+	}
+	return nil
 }
 
 func channelIsActiveTx(ctx context.Context, tx *sql.Tx, tenantID, regionID, channelID string) (bool, error) {

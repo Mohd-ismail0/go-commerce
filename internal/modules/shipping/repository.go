@@ -98,8 +98,8 @@ func (r *Repository) SaveMethod(ctx context.Context, item ShippingMethod) (Shipp
 		return ShippingMethod{}, err
 	}
 	_, err = r.db.ExecContext(ctx, `
-INSERT INTO shipping_methods (id, tenant_id, region_id, shipping_zone_id, name, price_cents, currency, min_order_cents, max_order_cents, channel_ids, postal_prefixes, created_at, updated_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,NOW(),NOW())
+INSERT INTO shipping_methods (id, tenant_id, region_id, shipping_zone_id, name, price_cents, currency, min_order_cents, max_order_cents, channel_ids, postal_prefixes, delivery_days_min, delivery_days_max, description, weight_surcharge_per_kg_cents, created_at, updated_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,NULLIF($14,''),$15,NOW(),NOW())
 ON CONFLICT (id) DO UPDATE SET
 name = EXCLUDED.name,
 price_cents = EXCLUDED.price_cents,
@@ -108,9 +108,14 @@ min_order_cents = EXCLUDED.min_order_cents,
 max_order_cents = EXCLUDED.max_order_cents,
 channel_ids = EXCLUDED.channel_ids,
 postal_prefixes = EXCLUDED.postal_prefixes,
+delivery_days_min = EXCLUDED.delivery_days_min,
+delivery_days_max = EXCLUDED.delivery_days_max,
+description = EXCLUDED.description,
+weight_surcharge_per_kg_cents = EXCLUDED.weight_surcharge_per_kg_cents,
 updated_at = NOW()
 `, item.ID, item.TenantID, item.RegionID, item.ShippingZoneID, item.Name, item.PriceCents, item.Currency,
-		nullableInt64(item.MinOrderCents), nullableInt64(item.MaxOrderCents), chJSON, postJSON)
+		nullableInt64(item.MinOrderCents), nullableInt64(item.MaxOrderCents), chJSON, postJSON,
+		nullableInt64(item.DeliveryDaysMin), nullableInt64(item.DeliveryDaysMax), item.Description, nullableInt64(item.WeightSurchargePerKgCents))
 	if err != nil {
 		return ShippingMethod{}, err
 	}
@@ -127,7 +132,8 @@ func nullableInt64(v *int64) any {
 func (r *Repository) ListMethods(ctx context.Context, tenantID string) ([]ShippingMethod, error) {
 	rows, err := r.db.QueryContext(ctx, `
 SELECT id, tenant_id, region_id, shipping_zone_id, name, price_cents, currency,
-       min_order_cents, max_order_cents, channel_ids, postal_prefixes
+       min_order_cents, max_order_cents, channel_ids, postal_prefixes,
+       delivery_days_min, delivery_days_max, COALESCE(description,''), weight_surcharge_per_kg_cents
 FROM shipping_methods WHERE tenant_id = $1 ORDER BY created_at DESC
 `, tenantID)
 	if err != nil {
@@ -150,7 +156,8 @@ FROM shipping_methods WHERE tenant_id = $1 ORDER BY created_at DESC
 func (r *Repository) ListMethodsForTenantRegion(ctx context.Context, tenantID, regionID string) ([]ShippingMethod, error) {
 	rows, err := r.db.QueryContext(ctx, `
 SELECT m.id, m.tenant_id, m.region_id, m.shipping_zone_id, m.name, m.price_cents, m.currency,
-       m.min_order_cents, m.max_order_cents, m.channel_ids, m.postal_prefixes
+       m.min_order_cents, m.max_order_cents, m.channel_ids, m.postal_prefixes,
+       m.delivery_days_min, m.delivery_days_max, COALESCE(m.description,''), m.weight_surcharge_per_kg_cents
 FROM shipping_methods m
 WHERE m.tenant_id = $1 AND m.region_id = $2
 `, tenantID, regionID)
@@ -174,7 +181,8 @@ WHERE m.tenant_id = $1 AND m.region_id = $2
 func (r *Repository) GetMethodByID(ctx context.Context, tenantID, id string) (ShippingMethod, error) {
 	row := r.db.QueryRowContext(ctx, `
 SELECT id, tenant_id, region_id, shipping_zone_id, name, price_cents, currency,
-       min_order_cents, max_order_cents, channel_ids, postal_prefixes
+       min_order_cents, max_order_cents, channel_ids, postal_prefixes,
+       delivery_days_min, delivery_days_max, COALESCE(description,''), weight_surcharge_per_kg_cents
 FROM shipping_methods WHERE tenant_id = $1 AND id = $2
 `, tenantID, id)
 	return scanMethodRow(row)
@@ -185,9 +193,10 @@ func scanMethod(rows interface {
 }) (ShippingMethod, error) {
 	var m ShippingMethod
 	var min, max sql.NullInt64
+	var dmin, dmax, wsur sql.NullInt64
 	var ch, post []byte
 	err := rows.Scan(&m.ID, &m.TenantID, &m.RegionID, &m.ShippingZoneID, &m.Name, &m.PriceCents, &m.Currency,
-		&min, &max, &ch, &post)
+		&min, &max, &ch, &post, &dmin, &dmax, &m.Description, &wsur)
 	if err != nil {
 		return ShippingMethod{}, err
 	}
@@ -198,6 +207,18 @@ func scanMethod(rows interface {
 	if max.Valid {
 		v := max.Int64
 		m.MaxOrderCents = &v
+	}
+	if dmin.Valid {
+		v := dmin.Int64
+		m.DeliveryDaysMin = &v
+	}
+	if dmax.Valid {
+		v := dmax.Int64
+		m.DeliveryDaysMax = &v
+	}
+	if wsur.Valid {
+		v := wsur.Int64
+		m.WeightSurchargePerKgCents = &v
 	}
 	_ = json.Unmarshal(ch, &m.ChannelIDs)
 	_ = json.Unmarshal(post, &m.PostalPrefixes)
@@ -207,9 +228,10 @@ func scanMethod(rows interface {
 func scanMethodRow(row *sql.Row) (ShippingMethod, error) {
 	var m ShippingMethod
 	var min, max sql.NullInt64
+	var dmin, dmax, wsur sql.NullInt64
 	var ch, post []byte
 	err := row.Scan(&m.ID, &m.TenantID, &m.RegionID, &m.ShippingZoneID, &m.Name, &m.PriceCents, &m.Currency,
-		&min, &max, &ch, &post)
+		&min, &max, &ch, &post, &dmin, &dmax, &m.Description, &wsur)
 	if err != nil {
 		return ShippingMethod{}, err
 	}
@@ -220,6 +242,18 @@ func scanMethodRow(row *sql.Row) (ShippingMethod, error) {
 	if max.Valid {
 		v := max.Int64
 		m.MaxOrderCents = &v
+	}
+	if dmin.Valid {
+		v := dmin.Int64
+		m.DeliveryDaysMin = &v
+	}
+	if dmax.Valid {
+		v := dmax.Int64
+		m.DeliveryDaysMax = &v
+	}
+	if wsur.Valid {
+		v := wsur.Int64
+		m.WeightSurchargePerKgCents = &v
 	}
 	_ = json.Unmarshal(ch, &m.ChannelIDs)
 	_ = json.Unmarshal(post, &m.PostalPrefixes)

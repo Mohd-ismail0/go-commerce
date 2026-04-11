@@ -583,6 +583,110 @@ components:
       required: [order_id]
       properties:
         order_id: { type: string }
+    CheckoutProblem:
+      type: object
+      required: [code, message, severity]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        severity:
+          type: string
+          enum: [error, warning]
+    CheckoutValidationReport:
+      type: object
+      required: [checkout_id, problems]
+      properties:
+        checkout_id: { type: string }
+        problems:
+          type: array
+          items:
+            $ref: "#/components/schemas/CheckoutProblem"
+    ShopSettings:
+      type: object
+      required: [tenant_id, region_id, display_name, domain, support_email, company_address]
+      properties:
+        tenant_id: { type: string }
+        region_id: { type: string }
+        display_name: { type: string }
+        domain: { type: string }
+        support_email: { type: string }
+        company_address: { type: string }
+        metadata:
+          type: object
+          additionalProperties: true
+        updated_at:
+          type: string
+          format: date-time
+    ShopSettingsPatchInput:
+      type: object
+      properties:
+        display_name: { type: string }
+        domain: { type: string }
+        support_email: { type: string }
+        company_address: { type: string }
+        metadata:
+          type: object
+          additionalProperties: true
+    Warehouse:
+      type: object
+      required: [id, tenant_id, region_id, name, code]
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        region_id: { type: string }
+        name: { type: string }
+        code: { type: string }
+        is_active: { type: boolean }
+    WarehouseInput:
+      type: object
+      required: [name, code]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        code: { type: string }
+        is_active: { type: boolean }
+    WarehouseListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Warehouse"
+    ShippingMethod:
+      type: object
+      required: [shipping_zone_id, name, price_cents, currency]
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        region_id: { type: string }
+        shipping_zone_id: { type: string }
+        name: { type: string }
+        price_cents: { type: integer, format: int64 }
+        currency: { type: string }
+        min_order_cents: { type: integer, format: int64, nullable: true }
+        max_order_cents: { type: integer, format: int64, nullable: true }
+        channel_ids:
+          type: array
+          items: { type: string }
+        postal_prefixes:
+          type: array
+          items: { type: string }
+        delivery_days_min: { type: integer, format: int64, nullable: true }
+        delivery_days_max: { type: integer, format: int64, nullable: true }
+        description: { type: string }
+        weight_surcharge_per_kg_cents: { type: integer, format: int64, nullable: true }
+        quoted_price_cents: { type: integer, format: int64, nullable: true }
+    ShippingResolveInput:
+      type: object
+      required: [country_code, channel_id, postal_code, order_total_cents, currency]
+      properties:
+        country_code: { type: string }
+        channel_id: { type: string }
+        postal_code: { type: string }
+        order_total_cents: { type: integer, format: int64 }
+        currency: { type: string }
+        total_weight_grams: { type: integer, format: int64, nullable: true }
     WebhookSubscription:
       type: object
       required: [id, tenant_id, region_id, event_name, endpoint_url, is_active]
@@ -1062,6 +1166,33 @@ paths:
                 $ref: "#/components/schemas/CheckoutSession"
         "400":
           description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /checkouts/sessions/{checkout_id}/validation:
+    get:
+      operationId: get_checkouts_sessions_by_checkout_id_validation
+      summary: Checkout validation / problems
+      description: |
+        Read-only aggregate of readiness issues before completion (shipping, payment coverage, channel listings,
+        salable stock vs reservations). Does not recalculate totals; uses the current session `total_cents` for payment checks.
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: checkout_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Validation report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutValidationReport"
+        "404":
+          description: Checkout not found
           content:
             application/json:
               schema:
@@ -2883,6 +3014,51 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /inventory/warehouses:
+    get:
+      operationId: get_inventory_warehouses
+      summary: List warehouses for tenant/region
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Warehouse list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WarehouseListResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: post_inventory_warehouses
+      summary: Create or update warehouse
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WarehouseInput"
+      responses:
+        "201":
+          description: Warehouse saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Warehouse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /promotions:
     get:
       operationId: get_promotions
@@ -2970,6 +3146,55 @@ paths:
       responses:
         "201":
           description: Voucher saved
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /shop/settings:
+    get:
+      operationId: get_shop_settings
+      summary: Shop / storefront settings (tenant/region)
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+      responses:
+        "200":
+          description: Shop settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShopSettings"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: patch_shop_settings
+      summary: Partially update shop settings
+      description: |
+        Idempotent by `Idempotency-Key` per tenant; scope `shop.settings:{tenant}:{region}` with advisory lock +
+        idempotency save in the same transaction as the row update.
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - $ref: "#/components/parameters/IdempotencyHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShopSettingsPatchInput"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShopSettings"
         "400":
           description: Bad request
           content:
@@ -3795,6 +4020,9 @@ paths:
     post:
       operationId: post_shipping_resolve
       summary: Resolve eligible shipping methods for country, channel, postal prefix, and order total
+      description: |
+        Optional `total_weight_grams` with a method `weight_surcharge_per_kg_cents` adds `(grams * surcharge) / 1000` to
+        flat `price_cents` and returns `quoted_price_cents` on each method. Checkout recalculation still uses flat method price until cart weight is modeled on the session.
       security:
         - ApiTokenAuth: []
           RoleHeaderAuth: []
@@ -3802,9 +4030,21 @@ paths:
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShippingResolveInput"
       responses:
         "200":
           description: Eligible methods
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ShippingMethod"
         "400":
           description: Bad request
           content:
@@ -3825,6 +4065,12 @@ paths:
       responses:
         "200":
           description: Shipping method list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ShippingMethod"
         "400":
           description: Bad request
           content:
@@ -3841,9 +4087,19 @@ paths:
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShippingMethod"
       responses:
         "201":
           description: Shipping method saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShippingMethod"
         "400":
           description: Bad request
           content:

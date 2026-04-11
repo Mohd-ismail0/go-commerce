@@ -62,3 +62,16 @@ func (o OrderCreatedPayload) GetTenantID() string {
 func (o OrderCreatedPayload) GetRegionID() string {
 	return o.RegionID
 }
+
+// CheckoutProblem is one validation finding (Saleor checkoutProblems-style, REST).
+type CheckoutProblem struct {
+	Code     string `json:"code"`
+	Message  string `json:"message"`
+	Severity string `json:"severity"` // error | warning
+}
+
+// CheckoutValidationReport aggregates readiness checks before completion.
+type CheckoutValidationReport struct {
+	CheckoutID string            `json:"checkout_id"`
+	Problems   []CheckoutProblem `json:"problems"`
+}

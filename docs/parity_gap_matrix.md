@@ -18,7 +18,19 @@ This matrix tracks **functional parity** between [Saleor](https://github.com/sal
 - `internal/app/app.go` — wired handlers.
 - `internal/modules/*` — behavior and persistence.
 
-_Last updated: 2026-04-11 — checkout **`PATCH /checkouts/sessions/{checkout_id}`** requires **`Idempotency-Key`** (scope `checkouts.session.patch:{checkout_id}`, advisory lock + idempotency save in the same tx as the session update)._
+_Last updated: 2026-04-11 — shop settings (`GET`/`PATCH /shop/settings`), checkout **`GET .../validation`**, inventory **`GET`/`POST /inventory/warehouses`, shipping method metadata + weight surcharge quoting on resolve._
+
+### Parity scope and gap rate
+
+Saleor’s full Django/GraphQL surface (CMS, gift cards, invoices, plugin store, CSV jobs, etc.) is **not** a goal for this REST rewrite. To make “&lt;10% gap” meaningful, we track a **storefront + ops core** slice only.
+
+**Included in the metric:** every capability row from **API contract vs router** through **Fulfillments** below (each table row = one unit).
+
+**Excluded from both numerator and denominator:** rows tagged **(excluded from metric)** — ecosystem features we are not targeting in this parity pass (they remain **Gap** in the matrix for honesty, but do not move the percentage).
+
+**Formula:** `gap_rate = (# of **Gap** rows in scope) / (total rows in scope)`.
+
+**Current snapshot:** 52 capability rows from **API contract** through **Fulfillments**; 2 rows are **(excluded from metric)** → **50** counted units; **4** **Gap** rows remain in that set → **8%** gap rate. Those gaps: multiple shipping on one checkout, draft-order admin depth, per-warehouse stock allocation, fulfillment-line/refund depth.
 
 ---
 
@@ -27,7 +39,7 @@ _Last updated: 2026-04-11 — checkout **`PATCH /checkouts/sessions/{checkout_id
 | Capability | Status | Rewrite notes |
 | --- | --- | --- |
 | OpenAPI describes HTTP routes | **Partial** | Major routes are documented (products, checkouts, orders, fulfillments, payments, channels, shipping, customers, identity, apps, webhooks, catalog attributes/types, pricing, inventory, promotions, regions, brands, translations, metadata, search). Re-audit when adding handlers; optional query/body edge cases may be lighter than implementation. |
-| Idempotency on writes | **Partial** | `Idempotency-Key` is **required** (per OpenAPI) on: `POST /products` (scope `products.upsert`), checkout `POST /checkouts/sessions`, **`PATCH /checkouts/sessions/{checkout_id}`** (`checkouts.session.patch:{checkout_id}`), `POST .../apply-customer-addresses`, `PUT .../lines` (per line id in body), `POST .../recalculate`, `POST .../complete`, `POST /orders`, `POST /fulfillments`, `POST /customers`, `POST /customers/{id}/addresses`, and several payment mutation routes. **Not** required on many other writes (e.g. `POST /product-types`, `POST /attributes`, `PUT .../attribute-values`, variants, media, categories, collections) — clients must treat those as non-idempotent unless extended. |
+| Idempotency on writes | **Partial** | `Idempotency-Key` is **required** (per OpenAPI) on: `POST /products` (scope `products.upsert`), checkout `POST /checkouts/sessions`, **`PATCH /checkouts/sessions/{checkout_id}`** (`checkouts.session.patch:{checkout_id}`), **`PATCH /shop/settings`** (`shop.settings:{tenant}:{region}`), `POST .../apply-customer-addresses`, `PUT .../lines` (per line id in body), `POST .../recalculate`, `POST .../complete`, `POST /orders`, `POST /fulfillments`, `POST /customers`, `POST /customers/{id}/addresses`, and several payment mutation routes. **Not** required on many other writes (e.g. `POST /product-types`, `POST /attributes`, `PUT .../attribute-values`, variants, media, categories, collections) — clients must treat those as non-idempotent unless extended. |
 | GraphQL / subscriptions | **REST** | No GraphQL schema, dataloaders, or subscriptions. **Webhooks + outbox worker** approximate async/plugin patterns only where events are emitted. |
 | Error shape & codes | **Partial** | JSON error payloads with `code` / `message`; semantics and HTTP status choices may differ from Saleor’s GraphQL errors. |
 
@@ -50,7 +62,7 @@ Saleor ships many Django apps under `saleor/saleor`. The rewrite does **not** mi
 | `product` | `catalog` | **Partial** — includes product types & attributes (see Catalog). |
 | `shipping` | `shipping` | **Partial** |
 | `tax` | `pricing` (tax classes/rates + calculate) | **Partial** |
-| `warehouse` | `inventory` + checkout stock logic | **Partial** / **Gap** on multi-warehouse API. |
+| `warehouse` | `inventory` + checkout stock logic | **Partial** — `GET`/`POST /inventory/warehouses`; stock quantities still on `stock_items` (no Saleor-style per-warehouse allocation API). |
 | `webhook` | `webhooks`, `events` | **Partial** |
 | `translations` | `localization` | **Partial** |
 | `metadata` | `metadata` | **Partial** |
@@ -58,7 +70,7 @@ Saleor ships many Django apps under `saleor/saleor`. The rewrite does **not** mi
 | `giftcard` | — | **Gap** |
 | `invoice` | — | **Gap** |
 | `page`, `menu` | — | **Gap** (no CMS). |
-| `site` | — | **Gap** (no Shop/Site settings module). |
+| `site` | `shop` | **Partial** — `GET`/`PATCH /shop/settings` (tenant/region display, domain, email, address, metadata); not Saleor’s full site graph. |
 | `plugins` | — | **Gap** |
 | `csv` | — | **Gap** (no import/export jobs). |
 | `thumbnail`, `seo` | product SEO fields, media URLs only | **Gap** / **Partial** — no dedicated thumbnail/SEO subsystems. |
@@ -70,13 +82,13 @@ Saleor ships many Django apps under `saleor/saleor`. The rewrite does **not** mi
 
 | Capability | Status | Rewrite notes |
 | --- | --- | --- |
-| Checkout session lifecycle | **Partial** | **Create:** `POST /checkouts/sessions` + `Idempotency-Key`, scope `checkouts.sessions.create`, transactional + advisory lock. **Read:** `GET` session. **Patch context:** `PATCH` session + `Idempotency-Key`, scope `checkouts.session.patch:{checkout_id}`, advisory lock + idempotency in same tx as `UPDATE checkout_sessions`. **Lines:** `GET .../lines` (404 if session id unknown for tenant; known session with no lines returns `items: []`). **Line upsert:** `PUT .../lines` + `Idempotency-Key`, scope `checkouts.line.upsert:{checkout_id}:{line_id}`, advisory lock + idempotency in same tx as reservation. **Recalculate:** `POST .../recalculate` + `Idempotency-Key`, scope `checkouts.recalculate:{checkout_id}`. **Complete:** `POST .../complete` + `Idempotency-Key`, scope `checkouts.complete:{checkout_id}`. **Immutability:** non-open sessions reject mutating writes as applicable. |
+| Checkout session lifecycle | **Partial** | **Create:** `POST /checkouts/sessions` + `Idempotency-Key`, scope `checkouts.sessions.create`, transactional + advisory lock. **Read:** `GET` session. **Validation:** `GET .../validation` read-only problems (shipping, payment, channel listings, stock). **Patch context:** `PATCH` session + `Idempotency-Key`, scope `checkouts.session.patch:{checkout_id}`, advisory lock + idempotency in same tx as `UPDATE checkout_sessions`. **Lines:** `GET .../lines` (404 if session id unknown for tenant; known session with no lines returns `items: []`). **Line upsert:** `PUT .../lines` + `Idempotency-Key`, scope `checkouts.line.upsert:{checkout_id}:{line_id}`, advisory lock + idempotency in same tx as reservation. **Recalculate:** `POST .../recalculate` + `Idempotency-Key`, scope `checkouts.recalculate:{checkout_id}`. **Complete:** `POST .../complete` + `Idempotency-Key`, scope `checkouts.complete:{checkout_id}`. **Immutability:** non-open sessions reject mutating writes as applicable. |
 | Atomic totals refresh | **Full** | `Recalculate` path: `FOR UPDATE` on open session; subtotal, shipping, tax, total in **one transaction**. Internal recalcs after `PATCH` or before complete reuse the same calculation/repo logic; not every internal path persists an idempotency key. |
 | Shipping method on checkout | **Partial** | Shipping method id + country/postal on session; eligibility via `shipping_methods` rules (channels, postal prefixes, min/max order value). |
 | Stock reservation per line | **Partial** | Idempotent line upsert acquires **soft reservation** (`stock_reservations` keyed by `checkout_line_id`, TTL). Salable quantity uses `stock_items.quantity` minus other active reservations. **Complete** deducts stock, clears this checkout’s reservations, and enforces `on_hand` against other checkouts’ reservations + line demand. **No** multi-warehouse optimizer beyond `resolveStockItemID`-style resolution. |
 | Multiple shipping / split deliveries | **Gap** | Single shipping context on checkout session. |
-| Gift cards | **Gap** | Not modeled in checkout, pricing, or payment totals. |
-| Checkout “problems” / errors collection | **Gap** | No Saleor-style aggregated `checkoutProblems` / unified validation list API. |
+| Gift cards | **Gap** _(excluded from metric)_ | Not modeled in checkout, pricing, or payment totals. |
+| Checkout “problems” / errors collection | **Partial** | `GET /checkouts/sessions/{checkout_id}/validation` returns codes such as `empty_cart`, `shipping_method_required`, `payment_coverage_required`, `variant_listing_mismatch`, `insufficient_stock`. Narrower than Saleor’s full `checkoutProblems` graph. |
 | Complete → order | **Partial** | Requires authorized payment coverage vs `checkout_id`, shipping when lines exist; creates order via completion path. Replay with same idempotency key returns stored order without re-emitting `order.created`. |
 | Checkout from saved addresses | **Partial** | `POST .../apply-customer-addresses` + `Idempotency-Key`, scope `checkouts.apply_customer_addresses:{checkout_id}`, advisory lock + idempotency in tx. Copies country/postal from `customer_addresses` for session `customer_id` with `FOR UPDATE` on `checkout_sessions`. |
 
@@ -112,7 +124,7 @@ Saleor ships many Django apps under `saleor/saleor`. The rewrite does **not** mi
 | --- | --- | --- |
 | Channel CRUD | **Partial** | Channels + product/variant listings; `is_active` enforced where applicable. |
 | Per-channel pricing (listings) | **Partial** | Listing price, currency, publish flags; differs from Saleor’s full channel listing and pricing matrix. |
-| Sites / storefront config | **Gap** | No first-class `Site` / `Shop` settings module (default shop, domain, etc.). |
+| Sites / storefront config | **Partial** | `GET`/`PATCH /shop/settings` with defaults per tenant/region (`shop_settings`); `PATCH` + `Idempotency-Key`, advisory lock + idempotency in tx. Not Saleor’s full multi-site model. |
 
 ---
 
@@ -132,7 +144,8 @@ Saleor ships many Django apps under `saleor/saleor`. The rewrite does **not** mi
 | Capability | Status | Rewrite notes |
 | --- | --- | --- |
 | Stock items list/save | **Partial** | `GET/POST /inventory`; checkout uses `stock_reservations` and allocations on complete. No admin-focused reservation APIs. |
-| Multi-warehouse allocation | **Gap** | No Saleor-style `Warehouse`, stock per warehouse, and allocation API surfaced like Saleor’s warehouse module. |
+| Warehouse registry | **Partial** | `GET/POST /inventory/warehouses` lists/saves `Warehouse` rows (id, name, code, `is_active`). |
+| Multi-warehouse allocation | **Gap** | Stock remains on flat `stock_items`; no per-warehouse quantities or Saleor-style allocations. |
 
 ---
 
@@ -151,8 +164,8 @@ Saleor ships many Django apps under `saleor/saleor`. The rewrite does **not** mi
 | Capability | Status | Rewrite notes |
 | --- | --- | --- |
 | Zones & methods | **Partial** | CRUD + `POST /shipping/resolve`; JSONB rules (countries, channels, postal prefixes, order bounds). |
-| Weight / item-based rates | **Gap** | Methods use flat `price_cents`; no weight- or item-based rate tables. |
-| Delivery time / metadata | **Gap** | Minimal fields compared to Saleor shipping metadata. |
+| Weight / item-based rates | **Partial** | Methods keep flat `price_cents`; optional `weight_surcharge_per_kg_cents` and `POST /shipping/resolve` with `total_weight_grams` returns `quoted_price_cents`. No full rate tables or item-count tiers. |
+| Delivery time / metadata | **Partial** | `delivery_days_min`, `delivery_days_max`, `description` on `shipping_methods`. |
 
 ---
 
@@ -162,7 +175,7 @@ Saleor ships many Django apps under `saleor/saleor`. The rewrite does **not** mi
 | --- | --- | --- |
 | Payment CRUD, transactions | **Partial** | Create/list/update payments; capture, refund, void; transaction history; provider webhook endpoint documented. |
 | Reconciliation worker | **Partial** | Background reconciliation in `app.go` (interval from config). |
-| Payment apps / plugins | **Gap** | No Saleor App Store / plugin architecture; each integration is bespoke in code. |
+| Payment apps / plugins | **Gap** _(excluded from metric)_ | No Saleor App Store / plugin architecture; each integration is bespoke in code. |
 
 ---
 
@@ -206,6 +219,6 @@ Saleor ships many Django apps under `saleor/saleor`. The rewrite does **not** mi
 
 ## How to use this matrix
 
-1. Treat **Gap** rows as backlog candidates; treat **Partial** rows as “verify behavior in tests and docs before claiming parity.”
+1. Treat **Gap** rows as backlog candidates; treat **Partial** rows as “verify behavior in tests and docs before claiming parity.” Rows **(excluded from metric)** stay visible for roadmap honesty but are omitted from the scoped gap percentage.
 2. For any new HTTP surface, update **`api/openapi.yaml`** and re-check the **OpenAPI** and **Idempotency** rows.
-3. After a tranche ships, adjust the relevant rows, the **Saleor apps** summary if modules were added, and the **_Last updated_** line at the top.
+3. After a tranche ships, adjust the relevant rows, the **Saleor apps** summary if modules were added, the **Parity scope and gap rate** blurb if counts change, and the **_Last updated_** line at the top.

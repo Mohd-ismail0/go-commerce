@@ -310,6 +310,10 @@ func (f *fakeRepo) HasAuthorizedPaymentCoverage(_ context.Context, _, _, _ strin
 	return f.paymentCovered, nil
 }
 
+func (f *fakeRepo) ValidateCheckoutStock(context.Context, string, string, string) error {
+	return nil
+}
+
 func (f *fakeRepo) Complete(_ context.Context, tenantID, regionID, checkoutID, idempotencyKey string) (CompleteOutcome, error) {
 	key := strings.TrimSpace(idempotencyKey)
 	if key == "" {
@@ -338,6 +342,37 @@ func (f *fakeRepo) Complete(_ context.Context, tenantID, regionID, checkoutID, i
 	}
 	f.completePayloadByIdem[sk] = payload
 	return CompleteOutcome{Payload: payload, FromIdempotencyReplay: false}, nil
+}
+
+func TestValidateCheckoutReportsSessionNotOpen(t *testing.T) {
+	repo := &fakeRepo{session: Session{ID: "chk_1", Status: "completed", Currency: "USD"}}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	report, err := svc.ValidateCheckout(context.Background(), "tenant_a", "us", "chk_1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(report.Problems) != 1 || report.Problems[0].Code != "session_not_open" {
+		t.Fatalf("expected session_not_open problem, got %+v", report.Problems)
+	}
+}
+
+func TestValidateCheckoutEmptyCartWarning(t *testing.T) {
+	repo := &fakeRepo{session: Session{ID: "chk_1", Status: "open", Currency: "USD"}}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	report, err := svc.ValidateCheckout(context.Background(), "tenant_a", "us", "chk_1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var found bool
+	for _, p := range report.Problems {
+		if p.Code == "empty_cart" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected empty_cart warning, got %+v", report.Problems)
+	}
 }
 
 func TestCompleteMapsChannelListingMismatchToConflict(t *testing.T) {

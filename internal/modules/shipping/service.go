@@ -38,6 +38,12 @@ func (s *Service) SaveMethod(ctx context.Context, m ShippingMethod) (ShippingMet
 	if strings.TrimSpace(m.Name) == "" || m.PriceCents < 0 || len(strings.TrimSpace(m.Currency)) != 3 {
 		return ShippingMethod{}, sharederrors.BadRequest("invalid shipping method payload")
 	}
+	if m.DeliveryDaysMin != nil && m.DeliveryDaysMax != nil && *m.DeliveryDaysMin > *m.DeliveryDaysMax {
+		return ShippingMethod{}, sharederrors.BadRequest("delivery_days_min cannot exceed delivery_days_max")
+	}
+	if m.WeightSurchargePerKgCents != nil && *m.WeightSurchargePerKgCents < 0 {
+		return ShippingMethod{}, sharederrors.BadRequest("weight_surcharge_per_kg_cents must be non-negative")
+	}
 	if m.ID == "" {
 		m.ID = utils.NewID("shm")
 	}
@@ -92,7 +98,13 @@ func (s *Service) ResolveEligible(ctx context.Context, tenantID, regionID string
 		if !MethodMatchesOrderTotal(m, in.OrderTotalCents) {
 			continue
 		}
-		out = append(out, m)
+		cp := m
+		if m.WeightSurchargePerKgCents != nil && *m.WeightSurchargePerKgCents != 0 &&
+			in.TotalWeightGrams != nil && *in.TotalWeightGrams > 0 {
+			q := m.PriceCents + (*in.TotalWeightGrams**m.WeightSurchargePerKgCents)/1000
+			cp.QuotedPriceCents = &q
+		}
+		out = append(out, cp)
 	}
 	return out, nil
 }

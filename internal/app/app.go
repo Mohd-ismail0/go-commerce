@@ -27,6 +27,7 @@ import (
 	"rewrite/internal/modules/regions"
 	"rewrite/internal/modules/search"
 	"rewrite/internal/modules/shipping"
+	"rewrite/internal/modules/shop"
 	"rewrite/internal/modules/webhooks"
 	"rewrite/internal/server"
 	"rewrite/internal/shared/db"
@@ -122,6 +123,7 @@ func New(ctx context.Context) (*App, error) {
 		localization.NewHandler(localization.NewService(localization.NewRepository(conn))),
 		metadata.NewHandler(metadata.NewService(metadata.NewRepository(conn))),
 		search.NewHandler(search.NewService(search.NewRepository(conn))),
+		shop.NewHandler(shop.NewService(shop.NewRepository(conn))),
 	)
 	return &App{
 		srv:    s,
