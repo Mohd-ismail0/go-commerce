@@ -386,6 +386,42 @@ ON webhook_subscriptions (tenant_id, region_id, event_name, endpoint_url, COALES
 CREATE INDEX IF NOT EXISTS ix_webhook_subscriptions_active_lookup
 ON webhook_subscriptions (tenant_id, region_id, event_name, is_active);
 
+CREATE TABLE IF NOT EXISTS event_outbox (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  region_id TEXT NOT NULL,
+  event_name TEXT NOT NULL,
+  aggregate_type TEXT NOT NULL,
+  aggregate_id TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  available_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  attempts BIGINT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  region_id TEXT NOT NULL,
+  outbox_id TEXT NOT NULL REFERENCES event_outbox(id) ON DELETE CASCADE,
+  subscription_id TEXT NOT NULL REFERENCES webhook_subscriptions(id) ON DELETE CASCADE,
+  status TEXT NOT NULL,
+  response_status BIGINT,
+  response_body TEXT,
+  attempts BIGINT NOT NULL DEFAULT 0,
+  next_retry_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS ix_outbox_status_available_at ON event_outbox(status, available_at);
+CREATE INDEX IF NOT EXISTS ix_webhook_deliveries_status_next_retry ON webhook_deliveries(status, next_retry_at);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_webhook_deliveries_outbox_subscription
+ON webhook_deliveries(outbox_id, subscription_id);
+
 CREATE TABLE IF NOT EXISTS webhook_replay_audit (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL,
