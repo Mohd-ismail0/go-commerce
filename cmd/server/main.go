@@ -6,11 +6,15 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"rewrite/internal/app"
 )
+
+// Injected at link time, e.g. go build -ldflags "-X main.version=1.0.0"
+var version = "dev"
 
 func main() {
 	appCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -20,6 +24,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("bootstrap failed: %v", err)
 	}
+	log.Printf("rewrite commerce engine v%s listening on :%s", strings.TrimSpace(version), listenPort())
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -41,4 +46,11 @@ func main() {
 			log.Fatalf("server failed: %v", err)
 		}
 	}
+}
+
+func listenPort() string {
+	if p := strings.TrimSpace(os.Getenv("PORT")); p != "" {
+		return p
+	}
+	return "8080"
 }

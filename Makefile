@@ -48,4 +48,4 @@ down:
 	docker compose down
 
 migrate:
-	psql "$$DATABASE_URL" -f internal/shared/db/schema.sql
+	bash scripts/apply-migrations.sh
