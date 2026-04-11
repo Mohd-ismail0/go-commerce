@@ -3,11 +3,16 @@ package customers
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"time"
 )
 
 type Repository struct {
 	db *sql.DB
 }
+
+var ErrCustomerNotFound = errors.New("customer not found")
+var ErrAddressNotFound = errors.New("address not found")
 
 func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
@@ -68,4 +73,188 @@ SELECT EXISTS(
 )
 `, tenantID, regionID, email, excludeID).Scan(&exists)
 	return exists, err
+}
+
+func (r *Repository) customerExists(ctx context.Context, tenantID, regionID, customerID string) (bool, error) {
+	var ok bool
+	err := r.db.QueryRowContext(ctx, `
+SELECT EXISTS(
+  SELECT 1 FROM customers WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+)
+`, customerID, tenantID, regionID).Scan(&ok)
+	return ok, err
+}
+
+func lockCustomerTx(ctx context.Context, tx *sql.Tx, tenantID, regionID, customerID string) error {
+	var x int
+	err := tx.QueryRowContext(ctx, `
+SELECT 1 FROM customers WHERE id = $1 AND tenant_id = $2 AND region_id = $3 FOR UPDATE
+`, customerID, tenantID, regionID).Scan(&x)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrCustomerNotFound
+	}
+	return err
+}
+
+func (r *Repository) ListAddresses(ctx context.Context, tenantID, regionID, customerID string) ([]Address, error) {
+	ok, err := r.customerExists(ctx, tenantID, regionID, customerID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, ErrCustomerNotFound
+	}
+	rows, err := r.db.QueryContext(ctx, `
+SELECT id, tenant_id, region_id, customer_id, is_default_shipping, is_default_billing,
+  first_name, last_name, COALESCE(company,''), street_line_1, COALESCE(street_line_2,''), city, postal_code,
+  UPPER(country_code), COALESCE(phone,''), created_at, updated_at
+FROM customer_addresses
+WHERE tenant_id = $1 AND region_id = $2 AND customer_id = $3
+ORDER BY is_default_shipping DESC, is_default_billing DESC, updated_at DESC
+`, tenantID, regionID, customerID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+	out := make([]Address, 0)
+	for rows.Next() {
+		a, scanErr := scanAddressRow(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) SaveAddress(ctx context.Context, a Address) (Address, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Address{}, err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	if err := lockCustomerTx(ctx, tx, a.TenantID, a.RegionID, a.CustomerID); err != nil {
+		return Address{}, err
+	}
+
+	if a.IsDefaultShipping {
+		if _, err := tx.ExecContext(ctx, `
+UPDATE customer_addresses
+SET is_default_shipping = FALSE, updated_at = NOW()
+WHERE tenant_id = $1 AND region_id = $2 AND customer_id = $3 AND id <> $4
+`, a.TenantID, a.RegionID, a.CustomerID, a.ID); err != nil {
+			return Address{}, err
+		}
+	}
+	if a.IsDefaultBilling {
+		if _, err := tx.ExecContext(ctx, `
+UPDATE customer_addresses
+SET is_default_billing = FALSE, updated_at = NOW()
+WHERE tenant_id = $1 AND region_id = $2 AND customer_id = $3 AND id <> $4
+`, a.TenantID, a.RegionID, a.CustomerID, a.ID); err != nil {
+			return Address{}, err
+		}
+	}
+
+	var dummy int
+	exErr := tx.QueryRowContext(ctx, `
+SELECT 1 FROM customer_addresses
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND customer_id = $4
+`, a.ID, a.TenantID, a.RegionID, a.CustomerID).Scan(&dummy)
+	isUpdate := exErr == nil
+	if exErr != nil && !errors.Is(exErr, sql.ErrNoRows) {
+		return Address{}, exErr
+	}
+
+	var out Address
+	var scanErr error
+	if isUpdate {
+		out, scanErr = scanAddressRow(tx.QueryRowContext(ctx, `
+UPDATE customer_addresses
+SET is_default_shipping = $5, is_default_billing = $6,
+    first_name = $7, last_name = $8, company = NULLIF($9,''), street_line_1 = $10, street_line_2 = NULLIF($11,''),
+    city = $12, postal_code = $13, country_code = UPPER($14), phone = NULLIF($15,''), updated_at = NOW()
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND customer_id = $4
+RETURNING id, tenant_id, region_id, customer_id, is_default_shipping, is_default_billing,
+  first_name, last_name, COALESCE(company,''), street_line_1, COALESCE(street_line_2,''), city, postal_code,
+  UPPER(country_code), COALESCE(phone,''), created_at, updated_at
+`, a.ID, a.TenantID, a.RegionID, a.CustomerID, a.IsDefaultShipping, a.IsDefaultBilling,
+			a.FirstName, a.LastName, a.Company, a.StreetLine1, a.StreetLine2, a.City, a.PostalCode, a.CountryCode, a.Phone))
+	} else {
+		out, scanErr = scanAddressRow(tx.QueryRowContext(ctx, `
+INSERT INTO customer_addresses (
+  id, tenant_id, region_id, customer_id, is_default_shipping, is_default_billing,
+  first_name, last_name, company, street_line_1, street_line_2, city, postal_code, country_code, phone, created_at, updated_at
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,''),$10,NULLIF($11,''),$12,$13,UPPER($14),NULLIF($15,''),NOW(),NOW())
+RETURNING id, tenant_id, region_id, customer_id, is_default_shipping, is_default_billing,
+  first_name, last_name, COALESCE(company,''), street_line_1, COALESCE(street_line_2,''), city, postal_code,
+  UPPER(country_code), COALESCE(phone,''), created_at, updated_at
+`, a.ID, a.TenantID, a.RegionID, a.CustomerID, a.IsDefaultShipping, a.IsDefaultBilling,
+			a.FirstName, a.LastName, a.Company, a.StreetLine1, a.StreetLine2, a.City, a.PostalCode, a.CountryCode, a.Phone))
+	}
+	if scanErr != nil {
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			return Address{}, ErrAddressNotFound
+		}
+		return Address{}, scanErr
+	}
+	if err := tx.Commit(); err != nil {
+		return Address{}, err
+	}
+	return out, nil
+}
+
+func (r *Repository) DeleteAddress(ctx context.Context, tenantID, regionID, customerID, addressID string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	if err := lockCustomerTx(ctx, tx, tenantID, regionID, customerID); err != nil {
+		return err
+	}
+
+	res, err := tx.ExecContext(ctx, `
+DELETE FROM customer_addresses
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND customer_id = $4
+`, addressID, tenantID, regionID, customerID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrAddressNotFound
+	}
+	return tx.Commit()
+}
+
+type scanner interface {
+	Scan(dest ...any) error
+}
+
+func scanAddressRow(row scanner) (Address, error) {
+	var a Address
+	var createdAt, updatedAt time.Time
+	err := row.Scan(
+		&a.ID, &a.TenantID, &a.RegionID, &a.CustomerID, &a.IsDefaultShipping, &a.IsDefaultBilling,
+		&a.FirstName, &a.LastName, &a.Company, &a.StreetLine1, &a.StreetLine2, &a.City, &a.PostalCode,
+		&a.CountryCode, &a.Phone, &createdAt, &updatedAt,
+	)
+	if err != nil {
+		return Address{}, err
+	}
+	a.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
+	a.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+	return a, nil
 }

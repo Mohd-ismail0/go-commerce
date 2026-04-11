@@ -11,7 +11,7 @@ This matrix tracks **functional parity** between Saleor (GraphQL-first reference
 
 Primary references: `docs/saleor_mapping.md`, `api/openapi.yaml`, `internal/modules/*`, `internal/app/app.go`.
 
-_Last updated: checkout line stock reservations + `Complete` stock checks accounting for other carts._
+_Last updated: customer address CRUD with transactional default-address exclusivity._
 
 ## API contract vs router
 
@@ -67,7 +67,7 @@ _Last updated: checkout line stock reservations + `Complete` stock checks accoun
 | Capability | Status | Rewrite notes |
 | --- | --- | --- |
 | Customers list/save | **Partial** | Basic customer records; no rich account API parity. |
-| Addresses | **Gap** | Checkout carries country/postal fields; no full `Address` CRUD like Saleor account. |
+| Addresses | **Partial** | `GET/POST /customers/{id}/addresses`, `PUT/DELETE .../addresses/{address_id}`; OpenAPI documented. Save runs in a tx with `SELECT ... FOR UPDATE` on `customers` and clears competing default shipping/billing flags on other rows. |
 | Auth (login / refresh / logout) | **Partial** | Identity module: sessions, revoke, device binding options—overlap with Saleor JWT flows but not identical. |
 | Staff / permissions model | **Partial** | Policy middleware + DB permissions; differs from Saleor’s dashboard permission graph. |
 

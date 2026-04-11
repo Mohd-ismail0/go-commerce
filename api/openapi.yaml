@@ -709,6 +709,62 @@ components:
           type: string
           format: email
         name: { type: string }
+    CustomerAddress:
+      type: object
+      required:
+        [id, tenant_id, region_id, customer_id, first_name, last_name, street_line_1, city, postal_code, country_code]
+      properties:
+        id: { type: string }
+        tenant_id: { type: string }
+        region_id: { type: string }
+        customer_id: { type: string }
+        is_default_shipping: { type: boolean }
+        is_default_billing: { type: boolean }
+        first_name: { type: string }
+        last_name: { type: string }
+        company: { type: string }
+        street_line_1: { type: string }
+        street_line_2: { type: string }
+        city: { type: string }
+        postal_code: { type: string }
+        country_code:
+          type: string
+          pattern: "^[A-Za-z]{2}$"
+        phone: { type: string }
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CustomerAddressInput:
+      type: object
+      required: [first_name, last_name, street_line_1, city, postal_code, country_code]
+      properties:
+        id:
+          type: string
+          description: Optional on create; server-generated when omitted.
+        is_default_shipping: { type: boolean }
+        is_default_billing: { type: boolean }
+        first_name: { type: string }
+        last_name: { type: string }
+        company: { type: string }
+        street_line_1: { type: string }
+        street_line_2: { type: string }
+        city: { type: string }
+        postal_code: { type: string }
+        country_code:
+          type: string
+          pattern: "^[A-Za-z]{2}$"
+        phone: { type: string }
+    CustomerAddressListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CustomerAddress"
     PriceBookEntry:
       type: object
       properties:
@@ -1982,6 +2038,144 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /customers/{customer_id}/addresses:
+    get:
+      operationId: get_customers_by_customer_id_addresses
+      summary: List addresses for a customer
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: customer_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Address list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerAddressListResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Customer not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: post_customers_by_customer_id_addresses
+      summary: Create customer address
+      description: |
+        Locks the customer row and, when default flags are set, clears the same default on other addresses
+        for that customer in the same transaction (at most one default shipping and one default billing).
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: customer_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerAddressInput"
+      responses:
+        "201":
+          description: Address created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerAddress"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Customer not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /customers/{customer_id}/addresses/{address_id}:
+    put:
+      operationId: put_customers_by_customer_id_addresses_by_address_id
+      summary: Create or replace address by id
+      description: Idempotent upsert for a fixed address id under the customer (customer row locked; default flags reconciled like POST).
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: customer_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: address_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerAddressInput"
+      responses:
+        "200":
+          description: Address saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerAddress"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Customer or address not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: delete_customers_by_customer_id_addresses_by_address_id
+      summary: Delete customer address
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: path
+          name: customer_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: address_id
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Customer or address not found
           content:
             application/json:
               schema:
