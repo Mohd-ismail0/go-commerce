@@ -1044,9 +1044,13 @@ paths:
         from `customer_addresses` scoped to the session's `customer_id`, then updates only shipping and/or billing
         country and postal fields. Omitting an id leaves that side unchanged. Runs in one transaction; recalculates
         totals when a pricing engine is configured.
+        Idempotent by `Idempotency-Key` per tenant; scope `checkouts.apply_customer_addresses:{checkout_id}` with
+        `pg_advisory_xact_lock` in the same transaction. Replays return the current checkout session row (`200`)
+        without re-running address resolution or update.
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
+        - $ref: "#/components/parameters/IdempotencyHeader"
         - in: path
           name: checkout_id
           required: true

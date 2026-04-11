@@ -183,6 +183,11 @@ func (h *Handler) applyCustomerAddresses(w http.ResponseWriter, r *http.Request)
 		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
 		return
 	}
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "Idempotency-Key header is required"})
+		return
+	}
 	updated, err := h.svc.ApplyCustomerAddresses(
 		r.Context(),
 		middleware.TenantIDFromContext(r.Context()),
@@ -190,6 +195,7 @@ func (h *Handler) applyCustomerAddresses(w http.ResponseWriter, r *http.Request)
 		chi.URLParam(r, "checkout_id"),
 		req.ShippingAddressID,
 		req.BillingAddressID,
+		idempotencyKey,
 	)
 	if err != nil {
 		utils.WriteError(w, err)

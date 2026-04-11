@@ -22,6 +22,7 @@ type fakeRepo struct {
 	updateShippingErr     error
 	updatePricingErr      error
 	applyAddrErr          error
+	applyAddrIdem         map[string]Session
 	getSessionErr         error
 	idem                  map[string]Session
 	completePayloadByIdem map[string]OrderCreatedPayload
@@ -112,7 +113,18 @@ func (f *fakeRepo) GetVariantProductID(_ context.Context, _, _, variantID string
 	return "", false, nil
 }
 
-func (f *fakeRepo) ApplyCustomerAddressesToCheckout(_ context.Context, _, _, checkoutID, shipID, billID string) (Session, error) {
+func (f *fakeRepo) ApplyCustomerAddressesToCheckout(_ context.Context, tenantID, _, checkoutID, shipID, billID, idempotencyKey string) (Session, error) {
+	key := strings.TrimSpace(idempotencyKey)
+	if key == "" {
+		return Session{}, ErrCheckoutApplyAddressesIdempotencyKeyRequired
+	}
+	sk := tenantID + "|" + checkoutApplyCustomerAddressesScope(checkoutID) + "|" + key
+	if f.applyAddrIdem == nil {
+		f.applyAddrIdem = make(map[string]Session)
+	}
+	if prev, ok := f.applyAddrIdem[sk]; ok {
+		return prev, nil
+	}
 	if f.applyAddrErr != nil {
 		return Session{}, f.applyAddrErr
 	}
@@ -136,6 +148,7 @@ func (f *fakeRepo) ApplyCustomerAddressesToCheckout(_ context.Context, _, _, che
 		s.BillingAddressPostalCode = "M5V"
 	}
 	f.session = s
+	f.applyAddrIdem[sk] = s
 	return s, nil
 }
 
@@ -458,7 +471,7 @@ func TestRecalculateAppliesEligibleShippingMethod(t *testing.T) {
 
 func TestApplyCustomerAddressesRequiresAnID(t *testing.T) {
 	svc := NewService(&fakeRepo{}, events.NewBus(), &fakeCalculator{})
-	_, err := svc.ApplyCustomerAddresses(context.Background(), "t", "r", "chk_1", "", "  ")
+	_, err := svc.ApplyCustomerAddresses(context.Background(), "t", "r", "chk_1", "", "  ", "idem-a")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -467,13 +480,41 @@ func TestApplyCustomerAddressesRequiresAnID(t *testing.T) {
 func TestApplyCustomerAddressesMapsNotApplicableToNotFound(t *testing.T) {
 	repo := &fakeRepo{applyAddrErr: ErrCustomerAddressNotApplicable}
 	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
-	_, err := svc.ApplyCustomerAddresses(context.Background(), "t", "r", "chk_1", "adr_1", "")
+	_, err := svc.ApplyCustomerAddresses(context.Background(), "t", "r", "chk_1", "adr_1", "", "idem-a")
 	if err == nil {
 		t.Fatal("expected error")
 	}
 	apiErr, ok := err.(sharederrors.APIError)
 	if !ok || apiErr.Status != 404 {
 		t.Fatalf("expected 404 API error, got %#v", err)
+	}
+}
+
+func TestApplyCustomerAddressesRequiresIdempotencyKey(t *testing.T) {
+	svc := NewService(&fakeRepo{}, events.NewBus(), nil)
+	_, err := svc.ApplyCustomerAddresses(context.Background(), "t", "r", "chk_1", "adr_1", "", "  ")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	apiErr, ok := err.(sharederrors.APIError)
+	if !ok || apiErr.Status != 400 {
+		t.Fatalf("expected 400 API error, got %#v", err)
+	}
+}
+
+func TestApplyCustomerAddressesIdempotentReplayReturnsFirstSession(t *testing.T) {
+	repo := &fakeRepo{}
+	svc := NewService(repo, events.NewBus(), nil)
+	first, err := svc.ApplyCustomerAddresses(context.Background(), "tenant_a", "us", "chk_1", "adr_1", "", "apply-key")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	second, err := svc.ApplyCustomerAddresses(context.Background(), "tenant_a", "us", "chk_1", "adr_9", "", "apply-key")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if first.ShippingAddressPostalCode != second.ShippingAddressPostalCode || first.ShippingAddressPostalCode != "90210" {
+		t.Fatalf("expected replay of first apply, first=%+v second=%+v", first, second)
 	}
 }
 

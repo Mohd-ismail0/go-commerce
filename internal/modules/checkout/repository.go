@@ -19,6 +19,10 @@ func checkoutCompleteScope(checkoutID string) string {
 	return "checkouts.complete:" + checkoutID
 }
 
+func checkoutApplyCustomerAddressesScope(checkoutID string) string {
+	return "checkouts.apply_customer_addresses:" + checkoutID
+}
+
 var ErrSessionNotFound = errors.New("checkout session not found")
 var ErrSessionNotOpen = errors.New("checkout session is not open")
 var ErrCheckoutEmpty = errors.New("checkout has no lines")
@@ -32,6 +36,9 @@ var ErrIdempotencyKeyRequired = errors.New("checkout idempotency key is required
 var ErrCheckoutIdempotencyOrphan = errors.New("idempotency record references missing checkout session")
 var ErrCheckoutCompleteIdempotencyKeyRequired = errors.New("checkout completion idempotency key is required")
 var ErrCheckoutCompleteIdempotencyOrphan = errors.New("checkout completion idempotency references missing order")
+var ErrCheckoutApplyAddressesIdempotencyKeyRequired = errors.New("apply customer addresses idempotency key is required")
+var ErrCheckoutApplyAddressesIdempotencyOrphan = errors.New("apply customer addresses idempotency references missing checkout session")
+var ErrCheckoutApplyAddressesIdempotencyMismatch = errors.New("apply customer addresses idempotency record mismatch")
 
 // RecalculateOptions configures transactional checkout recalculation when a pricing engine is available.
 type RecalculateOptions struct {
@@ -41,7 +48,7 @@ type RecalculateOptions struct {
 type Repository interface {
 	CreateSession(ctx context.Context, in Session, idempotencyKey string) (Session, error)
 	UpdateSessionContext(ctx context.Context, tenantID, regionID, checkoutID string, in Session) (Session, error)
-	ApplyCustomerAddressesToCheckout(ctx context.Context, tenantID, regionID, checkoutID, shippingAddressID, billingAddressID string) (Session, error)
+	ApplyCustomerAddressesToCheckout(ctx context.Context, tenantID, regionID, checkoutID, shippingAddressID, billingAddressID, idempotencyKey string) (Session, error)
 	UpsertLine(ctx context.Context, tenantID, regionID string, line Line) (Line, error)
 	GetSession(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error)
 	ListLines(ctx context.Context, tenantID, regionID, checkoutID string) ([]Line, error)
@@ -341,7 +348,13 @@ WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 	return r.getSession(ctx, tenantID, regionID, checkoutID)
 }
 
-func (r *PostgresRepository) ApplyCustomerAddressesToCheckout(ctx context.Context, tenantID, regionID, checkoutID, shippingAddressID, billingAddressID string) (Session, error) {
+func (r *PostgresRepository) ApplyCustomerAddressesToCheckout(ctx context.Context, tenantID, regionID, checkoutID, shippingAddressID, billingAddressID, idempotencyKey string) (Session, error) {
+	checkoutID = strings.TrimSpace(checkoutID)
+	key := strings.TrimSpace(idempotencyKey)
+	if key == "" {
+		return Session{}, ErrCheckoutApplyAddressesIdempotencyKeyRequired
+	}
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Session{}, err
@@ -349,6 +362,42 @@ func (r *PostgresRepository) ApplyCustomerAddressesToCheckout(ctx context.Contex
 	defer func() {
 		_ = tx.Rollback()
 	}()
+
+	lockKey := tenantID + "\x00" + checkoutApplyCustomerAddressesScope(checkoutID) + "\x00" + key
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1::text))`, lockKey); err != nil {
+		return Session{}, err
+	}
+	qtx := r.queries.WithTx(tx)
+	scope := checkoutApplyCustomerAddressesScope(checkoutID)
+	resourceID, idemErr := qtx.GetIdempotencyResource(ctx, dbsqlc.GetIdempotencyResourceParams{
+		TenantID:       tenantID,
+		Scope:          scope,
+		IdempotencyKey: key,
+	})
+	if idemErr == nil && resourceID != "" {
+		if resourceID != checkoutID {
+			return Session{}, ErrCheckoutApplyAddressesIdempotencyMismatch
+		}
+		row := tx.QueryRowContext(ctx, `
+SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+FROM checkout_sessions
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+`, checkoutID, tenantID, regionID)
+		sess, scanErr := scanSession(row)
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			return Session{}, fmt.Errorf("%w: %q", ErrCheckoutApplyAddressesIdempotencyOrphan, checkoutID)
+		}
+		if scanErr != nil {
+			return Session{}, scanErr
+		}
+		if err := tx.Commit(); err != nil {
+			return Session{}, err
+		}
+		return sess, nil
+	}
+	if idemErr != nil && !errors.Is(idemErr, sql.ErrNoRows) {
+		return Session{}, idemErr
+	}
 
 	var customerID, status string
 	var shipC, shipP, billC, billP string
@@ -421,6 +470,14 @@ WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND status = 'open'
 	}
 	if n == 0 {
 		return Session{}, ErrSessionNotOpen
+	}
+	if err := qtx.SaveIdempotencyResource(ctx, dbsqlc.SaveIdempotencyResourceParams{
+		TenantID:       tenantID,
+		Scope:          scope,
+		IdempotencyKey: key,
+		ResourceID:     checkoutID,
+	}); err != nil {
+		return Session{}, err
 	}
 	if cerr := tx.Commit(); cerr != nil {
 		return Session{}, cerr

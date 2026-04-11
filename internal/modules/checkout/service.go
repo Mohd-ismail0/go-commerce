@@ -258,15 +258,25 @@ func (s *Service) UpdateSessionContext(ctx context.Context, tenantID, regionID, 
 }
 
 // ApplyCustomerAddresses copies country and postal code from saved customer_addresses rows onto the open checkout (same customer_id), under one DB transaction with a session row lock.
-func (s *Service) ApplyCustomerAddresses(ctx context.Context, tenantID, regionID, checkoutID, shippingAddressID, billingAddressID string) (Session, error) {
+func (s *Service) ApplyCustomerAddresses(ctx context.Context, tenantID, regionID, checkoutID, shippingAddressID, billingAddressID, idempotencyKey string) (Session, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return Session{}, sharederrors.BadRequest("Idempotency-Key is required")
+	}
+	key := strings.TrimSpace(idempotencyKey)
 	if strings.TrimSpace(checkoutID) == "" {
 		return Session{}, sharederrors.BadRequest("checkout_id is required")
 	}
 	if strings.TrimSpace(shippingAddressID) == "" && strings.TrimSpace(billingAddressID) == "" {
 		return Session{}, sharederrors.BadRequest("at least one of shipping_address_id or billing_address_id is required")
 	}
-	session, err := s.repo.ApplyCustomerAddressesToCheckout(ctx, tenantID, regionID, checkoutID, shippingAddressID, billingAddressID)
+	session, err := s.repo.ApplyCustomerAddressesToCheckout(ctx, tenantID, regionID, checkoutID, shippingAddressID, billingAddressID, key)
 	if err != nil {
+		if errors.Is(err, ErrCheckoutApplyAddressesIdempotencyKeyRequired) {
+			return Session{}, sharederrors.BadRequest("Idempotency-Key is required")
+		}
+		if errors.Is(err, ErrCheckoutApplyAddressesIdempotencyOrphan) || errors.Is(err, ErrCheckoutApplyAddressesIdempotencyMismatch) {
+			return Session{}, sharederrors.Internal("checkout apply-addresses idempotency record is inconsistent")
+		}
 		if errors.Is(err, ErrSessionNotFound) {
 			return Session{}, sharederrors.NotFound(err.Error())
 		}
