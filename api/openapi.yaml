@@ -172,7 +172,9 @@ components:
         variant_only: { type: boolean }
         allowed_values:
           description: JSON array of allowed strings when input_type is select.
+          type: array
           nullable: true
+          items: { type: string }
     ProductTypeDetail:
       allOf:
         - $ref: "#/components/schemas/ProductType"
@@ -195,7 +197,9 @@ components:
         unit: { type: string }
         allowed_values:
           description: Required for select — JSON array of strings.
+          type: array
           nullable: true
+          items: { type: string }
         created_at: { type: string, format: date-time }
     CatalogAttributeInput:
       type: object
@@ -208,7 +212,9 @@ components:
         unit: { type: string }
         allowed_values:
           description: JSON array of strings when input_type is select.
+          type: array
           nullable: true
+          items: { type: string }
     LinkAttributeToTypeInput:
       type: object
       required: [attribute_id]
@@ -2265,6 +2271,12 @@ paths:
                         type: array
                         items:
                           $ref: "#/components/schemas/ProductType"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
       operationId: post_product_types
       summary: Create product type
@@ -2385,6 +2397,12 @@ paths:
                         type: array
                         items:
                           $ref: "#/components/schemas/CatalogAttribute"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
       operationId: post_catalog_attributes
       summary: Create catalog attribute
