@@ -26,6 +26,11 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "Idempotency-Key header is required"})
+		return
+	}
 	var req struct {
 		ID             string `json:"id"`
 		OrderID        string `json:"order_id"`
@@ -47,7 +52,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		OrderID:        req.OrderID,
 		Status:         req.Status,
 		TrackingNumber: req.TrackingNumber,
-	})
+	}, idempotencyKey)
 	if err != nil {
 		utils.WriteError(w, err)
 		return

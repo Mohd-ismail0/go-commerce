@@ -116,3 +116,8 @@ func isValidTransition(from, to string) bool {
 		return to == "created"
 	}
 }
+
+// ValidStatusTransition reports whether an order status change is allowed (same rules as PATCH /orders).
+func ValidStatusTransition(from, to string) bool {
+	return isValidTransition(from, to)
+}

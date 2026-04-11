@@ -328,6 +328,46 @@ components:
         expected_updated_at:
           type: string
           format: date-time
+    Fulfillment:
+      type: object
+      required: [id, tenant_id, region_id, order_id, status]
+      properties:
+        id:
+          type: string
+        tenant_id:
+          type: string
+        region_id:
+          type: string
+        order_id:
+          type: string
+        status:
+          type: string
+        tracking_number:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+    FulfillmentCreateInput:
+      type: object
+      required: [order_id]
+      properties:
+        id:
+          type: string
+        order_id:
+          type: string
+        status:
+          type: string
+          description: Defaults to fulfilled when omitted.
+        tracking_number:
+          type: string
+    FulfillmentListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Fulfillment"
     CheckoutSession:
       type: object
       required: [id, tenant_id, region_id, customer_id, status, currency, subtotal_cents, shipping_cents, tax_cents, total_cents]
@@ -1071,6 +1111,74 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Optimistic concurrency conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /fulfillments:
+    get:
+      operationId: get_fulfillments
+      summary: List fulfillments
+      description: Optional filter by order_id.
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - in: query
+          name: order_id
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Fulfillment list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FulfillmentListResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: post_fulfillments
+      summary: Create fulfillment and complete order
+      description: |
+        Inserts a fulfillment row and advances the order to `completed` in a single database transaction
+        (`created` → `confirmed` → `completed`, or `confirmed` → `completed`). Idempotent by `Idempotency-Key`
+        per tenant (scope `fulfillments.create`).         Replays return the stored fulfillment without emitting `order.completed` again.
+        When the order was already `completed`, a new fulfillment does not re-emit `order.completed`.
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/RegionHeader"
+        - $ref: "#/components/parameters/IdempotencyHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FulfillmentCreateInput"
+      responses:
+        "201":
+          description: Fulfillment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Fulfillment"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Order not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Order not fulfillable (e.g. cancelled) or optimistic lock conflict on order status
           content:
             application/json:
               schema:

@@ -11,13 +11,13 @@ This matrix tracks **functional parity** between Saleor (GraphQL-first reference
 
 Primary references: `docs/saleor_mapping.md`, `api/openapi.yaml`, `internal/modules/*`, `internal/app/app.go`.
 
-_Last updated: transactional `Recalculate` (checkout row lock + single commit for subtotal, shipping, tax/total)._
+_Last updated: fulfillments OpenAPI + transactional create with idempotency and `order.completed` emission (non-replay only)._
 
 ## API contract vs router
 
 | Capability | Status | Rewrite notes |
 | --- | --- | --- |
-| OpenAPI describes all HTTP routes | **Partial** | `fulfillments` is registered in `app.go` but **not** present in `api/openapi.yaml`. |
+| OpenAPI describes all HTTP routes | **Partial** | All major routes documented, including `/fulfillments` (see `post_fulfillments`, `get_fulfillments`). Re-audit when adding handlers. |
 | Idempotency on writes | **Partial** | Supported where OpenAPI marks `Idempotency-Key` (e.g. orders, payments); not uniform across every POST. |
 | GraphQL / subscriptions | **REST** | No GraphQL; webhooks + outbox replace plugin real-time patterns. |
 
@@ -128,7 +128,8 @@ _Last updated: transactional `Recalculate` (checkout row lock + single commit fo
 
 | Capability | Status | Rewrite notes |
 | --- | --- | --- |
-| Fulfillment records | **Partial** | Service + HTTP routes exist; **OpenAPI gap** (see above). |
+| Fulfillment records | **Partial** | `GET/POST /fulfillments` in OpenAPI; create uses **one transaction** (order `FOR UPDATE`, insert fulfillment, status transitions + audit, idempotency save). |
+| Idempotent create | **Partial** | `Idempotency-Key` required; scope `fulfillments.create`. Replays return stored fulfillment without re-emitting `order.completed`. |
 | Fulfillment lines / refunds tie-in | **Gap** | Narrow model vs Saleor fulfillment lines and integrated refunds. |
 
 ---
