@@ -101,7 +101,11 @@ func (s *Service) CreateSession(ctx context.Context, in Session, idempotencyKey 
 	return saved, nil
 }
 
-func (s *Service) UpsertLine(ctx context.Context, tenantID, regionID string, in Line) (Line, error) {
+func (s *Service) UpsertLine(ctx context.Context, tenantID, regionID string, in Line, idempotencyKey string) (Line, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return Line{}, sharederrors.BadRequest("Idempotency-Key is required")
+	}
+	key := strings.TrimSpace(idempotencyKey)
 	if strings.TrimSpace(in.CheckoutID) == "" || strings.TrimSpace(in.ID) == "" {
 		return Line{}, sharederrors.BadRequest("checkout_id and id are required")
 	}
@@ -163,8 +167,14 @@ func (s *Service) UpsertLine(ctx context.Context, tenantID, regionID string, in 
 			return Line{}, sharederrors.Conflict("product is not published in checkout channel")
 		}
 	}
-	line, err := s.repo.UpsertLine(ctx, tenantID, regionID, in)
+	line, err := s.repo.UpsertLine(ctx, tenantID, regionID, in, key)
 	if err != nil {
+		if errors.Is(err, ErrCheckoutLineUpsertIdempotencyKeyRequired) {
+			return Line{}, sharederrors.BadRequest("Idempotency-Key is required")
+		}
+		if errors.Is(err, ErrCheckoutLineUpsertIdempotencyOrphan) || errors.Is(err, ErrCheckoutLineUpsertIdempotencyMismatch) {
+			return Line{}, sharederrors.Internal("checkout line idempotency record is inconsistent")
+		}
 		if errors.Is(err, ErrSessionNotFound) {
 			return Line{}, sharederrors.NotFound(err.Error())
 		}

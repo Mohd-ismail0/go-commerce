@@ -26,6 +26,7 @@ type fakeRepo struct {
 	getSessionErr         error
 	idem                  map[string]Session
 	completePayloadByIdem map[string]OrderCreatedPayload
+	lineUpsertIdem        map[string]Line
 }
 
 func (f *fakeRepo) CreateSession(_ context.Context, in Session, idempotencyKey string) (Session, error) {
@@ -43,10 +44,21 @@ func (f *fakeRepo) CreateSession(_ context.Context, in Session, idempotencyKey s
 	return in, nil
 }
 
-func (f *fakeRepo) UpsertLine(_ context.Context, _, _ string, line Line) (Line, error) {
+func (f *fakeRepo) UpsertLine(_ context.Context, tenantID, _ string, line Line, idempotencyKey string) (Line, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return Line{}, ErrCheckoutLineUpsertIdempotencyKeyRequired
+	}
 	if f.upsertErr != nil {
 		return Line{}, f.upsertErr
 	}
+	k := tenantID + "|" + checkoutLineUpsertScope(line.CheckoutID, line.ID) + "|" + strings.TrimSpace(idempotencyKey)
+	if f.lineUpsertIdem == nil {
+		f.lineUpsertIdem = make(map[string]Line)
+	}
+	if prev, ok := f.lineUpsertIdem[k]; ok {
+		return prev, nil
+	}
+	f.lineUpsertIdem[k] = line
 	return line, nil
 }
 
@@ -584,7 +596,7 @@ func TestUpsertLineRejectsUnpublishedVariantForSessionChannel(t *testing.T) {
 		Quantity:       1,
 		UnitPriceCents: 1200,
 		Currency:       "USD",
-	})
+	}, "idem_ln_unpub_v")
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -600,9 +612,58 @@ func TestUpsertLineRejectsPriceMismatchWithChannelListing(t *testing.T) {
 		Quantity:       1,
 		UnitPriceCents: 999,
 		Currency:       "USD",
-	})
+	}, "idem_ln_price")
 	if err == nil {
 		t.Fatalf("expected error")
+	}
+}
+
+func TestUpsertLineRequiresIdempotencyKey(t *testing.T) {
+	svc := NewService(&fakeRepo{}, events.NewBus(), &fakeCalculator{})
+	_, err := svc.UpsertLine(context.Background(), "tenant_a", "us", Line{
+		ID:             "ln_1",
+		CheckoutID:     "chk_1",
+		VariantID:      "var_ok",
+		Quantity:       1,
+		UnitPriceCents: 1200,
+		Currency:       "USD",
+	}, "  ")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	apiErr, ok := err.(sharederrors.APIError)
+	if !ok || apiErr.Status != 400 {
+		t.Fatalf("expected 400 API error, got %#v", err)
+	}
+}
+
+func TestUpsertLineIdempotentReplayReturnsFirstLine(t *testing.T) {
+	repo := &fakeRepo{session: Session{ID: "chk_1", ChannelID: "web", Currency: "USD"}}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	first, err := svc.UpsertLine(context.Background(), "tenant_a", "us", Line{
+		ID:             "ln_1",
+		CheckoutID:     "chk_1",
+		VariantID:      "var_ok",
+		Quantity:       1,
+		UnitPriceCents: 1200,
+		Currency:       "USD",
+	}, "same-line-key")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	second, err := svc.UpsertLine(context.Background(), "tenant_a", "us", Line{
+		ID:             "ln_1",
+		CheckoutID:     "chk_1",
+		VariantID:      "var_ok",
+		Quantity:       99,
+		UnitPriceCents: 1200,
+		Currency:       "USD",
+	}, "same-line-key")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if first.Quantity != second.Quantity || first.Quantity != 1 {
+		t.Fatalf("expected idempotent replay to return first line qty=1, got first=%+v second=%+v", first, second)
 	}
 }
 
@@ -677,7 +738,7 @@ func TestUpsertLineRejectsUnpublishedProductForSessionChannel(t *testing.T) {
 		Quantity:       1,
 		UnitPriceCents: 1200,
 		Currency:       "USD",
-	})
+	}, "idem_ln_prd_hidden")
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -693,7 +754,7 @@ func TestUpsertLineRejectsSessionCurrencyMismatch(t *testing.T) {
 		Quantity:       1,
 		UnitPriceCents: 1200,
 		Currency:       "EUR",
-	})
+	}, "idem_ln_curr")
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -710,7 +771,7 @@ func TestUpsertLineRejectsVariantProductMismatch(t *testing.T) {
 		Quantity:       1,
 		UnitPriceCents: 1200,
 		Currency:       "USD",
-	})
+	}, "idem_ln_var_mis")
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -726,7 +787,7 @@ func TestUpsertLineAutoFillsProductFromVariant(t *testing.T) {
 		Quantity:       1,
 		UnitPriceCents: 1200,
 		Currency:       "USD",
-	})
+	}, "idem_ln_autofill")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -745,7 +806,7 @@ func TestUpsertLineRejectsCompletedSession(t *testing.T) {
 		Quantity:       1,
 		UnitPriceCents: 1200,
 		Currency:       "USD",
-	})
+	}, "idem_ln_completed")
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -766,7 +827,7 @@ func TestUpsertLineMapsInsufficientStockToConflict(t *testing.T) {
 		Quantity:       1,
 		UnitPriceCents: 1200,
 		Currency:       "USD",
-	})
+	}, "idem_ln_stock")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -789,7 +850,7 @@ func TestUpsertLineMapsRepositorySessionNotOpenToConflict(t *testing.T) {
 		Quantity:       1,
 		UnitPriceCents: 1000,
 		Currency:       "USD",
-	})
+	}, "idem_ln_not_open")
 	if err == nil {
 		t.Fatalf("expected error")
 	}

@@ -23,6 +23,10 @@ func checkoutApplyCustomerAddressesScope(checkoutID string) string {
 	return "checkouts.apply_customer_addresses:" + checkoutID
 }
 
+func checkoutLineUpsertScope(checkoutID, lineID string) string {
+	return "checkouts.line.upsert:" + checkoutID + ":" + lineID
+}
+
 var ErrSessionNotFound = errors.New("checkout session not found")
 var ErrSessionNotOpen = errors.New("checkout session is not open")
 var ErrCheckoutEmpty = errors.New("checkout has no lines")
@@ -39,6 +43,9 @@ var ErrCheckoutCompleteIdempotencyOrphan = errors.New("checkout completion idemp
 var ErrCheckoutApplyAddressesIdempotencyKeyRequired = errors.New("apply customer addresses idempotency key is required")
 var ErrCheckoutApplyAddressesIdempotencyOrphan = errors.New("apply customer addresses idempotency references missing checkout session")
 var ErrCheckoutApplyAddressesIdempotencyMismatch = errors.New("apply customer addresses idempotency record mismatch")
+var ErrCheckoutLineUpsertIdempotencyKeyRequired = errors.New("checkout line upsert idempotency key is required")
+var ErrCheckoutLineUpsertIdempotencyOrphan = errors.New("checkout line upsert idempotency references missing line")
+var ErrCheckoutLineUpsertIdempotencyMismatch = errors.New("checkout line upsert idempotency record mismatch")
 
 // RecalculateOptions configures transactional checkout recalculation when a pricing engine is available.
 type RecalculateOptions struct {
@@ -49,7 +56,7 @@ type Repository interface {
 	CreateSession(ctx context.Context, in Session, idempotencyKey string) (Session, error)
 	UpdateSessionContext(ctx context.Context, tenantID, regionID, checkoutID string, in Session) (Session, error)
 	ApplyCustomerAddressesToCheckout(ctx context.Context, tenantID, regionID, checkoutID, shippingAddressID, billingAddressID, idempotencyKey string) (Session, error)
-	UpsertLine(ctx context.Context, tenantID, regionID string, line Line) (Line, error)
+	UpsertLine(ctx context.Context, tenantID, regionID string, line Line, idempotencyKey string) (Line, error)
 	GetSession(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error)
 	ListLines(ctx context.Context, tenantID, regionID, checkoutID string) ([]Line, error)
 	ChannelIsActive(ctx context.Context, tenantID, regionID, channelID string) (bool, error)
@@ -143,7 +150,12 @@ RETURNING id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALES
 	return saved, nil
 }
 
-func (r *PostgresRepository) UpsertLine(ctx context.Context, tenantID, regionID string, line Line) (Line, error) {
+func (r *PostgresRepository) UpsertLine(ctx context.Context, tenantID, regionID string, line Line, idempotencyKey string) (Line, error) {
+	key := strings.TrimSpace(idempotencyKey)
+	if key == "" {
+		return Line{}, ErrCheckoutLineUpsertIdempotencyKeyRequired
+	}
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Line{}, err
@@ -151,6 +163,42 @@ func (r *PostgresRepository) UpsertLine(ctx context.Context, tenantID, regionID 
 	defer func() {
 		_ = tx.Rollback()
 	}()
+
+	lockKey := tenantID + "\x00" + checkoutLineUpsertScope(line.CheckoutID, line.ID) + "\x00" + key
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1::text))`, lockKey); err != nil {
+		return Line{}, err
+	}
+	qtx := r.queries.WithTx(tx)
+	scope := checkoutLineUpsertScope(line.CheckoutID, line.ID)
+	resourceID, idemErr := qtx.GetIdempotencyResource(ctx, dbsqlc.GetIdempotencyResourceParams{
+		TenantID:       tenantID,
+		Scope:          scope,
+		IdempotencyKey: key,
+	})
+	if idemErr == nil && resourceID != "" {
+		if resourceID != line.ID {
+			return Line{}, ErrCheckoutLineUpsertIdempotencyMismatch
+		}
+		row := tx.QueryRowContext(ctx, `
+SELECT id, checkout_id, COALESCE(product_id,''), COALESCE(variant_id,''), quantity, unit_price_cents, currency
+FROM checkout_lines
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND checkout_id = $4
+`, line.ID, tenantID, regionID, line.CheckoutID)
+		out, scanErr := scanLine(row)
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			return Line{}, fmt.Errorf("%w: %q", ErrCheckoutLineUpsertIdempotencyOrphan, line.ID)
+		}
+		if scanErr != nil {
+			return Line{}, scanErr
+		}
+		if err := tx.Commit(); err != nil {
+			return Line{}, err
+		}
+		return out, nil
+	}
+	if idemErr != nil && !errors.Is(idemErr, sql.ErrNoRows) {
+		return Line{}, idemErr
+	}
 
 	if err := lockCheckoutSessionOpenTx(ctx, tx, tenantID, regionID, line.CheckoutID); err != nil {
 		return Line{}, err
@@ -242,6 +290,14 @@ RETURNING id, checkout_id, COALESCE(product_id,''), COALESCE(variant_id,''), qua
 `, line.ID, tenantID, regionID, line.Quantity, line.UnitPriceCents, line.ProductID, line.VariantID, line.Currency, line.CheckoutID)
 		out, lerr := scanLine(row)
 		if lerr == nil {
+			if err := qtx.SaveIdempotencyResource(ctx, dbsqlc.SaveIdempotencyResourceParams{
+				TenantID:       tenantID,
+				Scope:          scope,
+				IdempotencyKey: key,
+				ResourceID:     out.ID,
+			}); err != nil {
+				return Line{}, err
+			}
 			if cerr := tx.Commit(); cerr != nil {
 				return Line{}, cerr
 			}
@@ -274,6 +330,14 @@ RETURNING id, checkout_id, COALESCE(product_id,''), COALESCE(variant_id,''), qua
 				return Line{}, ErrSessionNotOpen
 			}
 		}
+		return Line{}, err
+	}
+	if err := qtx.SaveIdempotencyResource(ctx, dbsqlc.SaveIdempotencyResourceParams{
+		TenantID:       tenantID,
+		Scope:          scope,
+		IdempotencyKey: key,
+		ResourceID:     out.ID,
+	}); err != nil {
 		return Line{}, err
 	}
 	if cerr := tx.Commit(); cerr != nil {

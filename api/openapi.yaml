@@ -1120,10 +1120,13 @@ paths:
     put:
       operationId: put_checkouts_sessions_by_checkout_id_lines
       summary: Upsert checkout line
-      description: Resolves inventory for the variant or product, then reserves salable quantity for this line (soft hold) while the session stays open.
+      description: |
+        Resolves inventory for the variant or product, then reserves salable quantity for this line (soft hold) while the session stays open.
+        Idempotent by `Idempotency-Key` per tenant; scope `checkouts.line.upsert:{checkout_id}:{line_id}` (from path and body `id`) with advisory lock + idempotency save in the same transaction as stock reservation.
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
+        - $ref: "#/components/parameters/IdempotencyHeader"
         - in: path
           name: checkout_id
           required: true

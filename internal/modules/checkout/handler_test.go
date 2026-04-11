@@ -28,6 +28,23 @@ func TestCheckoutCreateRequiresIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestCheckoutUpsertLineRequiresIdempotencyKey(t *testing.T) {
+	h := NewHandler(NewService(&fakeRepo{}, events.NewBus(), nil))
+	r := chi.NewRouter()
+	r.Use(middleware.TenantRegion("public", "global"))
+	h.RegisterRoutes(r)
+
+	req := httptest.NewRequest(http.MethodPut, "/checkouts/sessions/chk_1/lines", bytes.NewBufferString(`{"id":"ln_1","quantity":1,"unit_price_cents":100,"currency":"USD","variant_id":"var_ok"}`))
+	req.Header.Set("X-Tenant-ID", "tenant_a")
+	req.Header.Set("X-Region-ID", "global")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", rr.Code)
+	}
+}
+
 func TestCheckoutApplyCustomerAddressesRequiresIdempotencyKey(t *testing.T) {
 	h := NewHandler(NewService(&fakeRepo{}, events.NewBus(), nil))
 	r := chi.NewRouter()

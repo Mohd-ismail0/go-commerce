@@ -119,11 +119,17 @@ func (h *Handler) upsertLine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.CheckoutID = chi.URLParam(r, "checkout_id")
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "Idempotency-Key header is required"})
+		return
+	}
 	saved, err := h.svc.UpsertLine(
 		r.Context(),
 		middleware.TenantIDFromContext(r.Context()),
 		middleware.RegionIDFromContext(r.Context()),
 		req,
+		idempotencyKey,
 	)
 	if err != nil {
 		utils.WriteError(w, err)
