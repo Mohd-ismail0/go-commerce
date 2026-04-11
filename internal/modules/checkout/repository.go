@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -61,18 +62,93 @@ RETURNING id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALES
 }
 
 func (r *PostgresRepository) UpsertLine(ctx context.Context, tenantID, regionID string, line Line) (Line, error) {
-	status, found, statusErr := r.sessionStatus(ctx, tenantID, regionID, line.CheckoutID)
-	if statusErr != nil {
-		return Line{}, statusErr
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Line{}, err
 	}
-	if !found {
-		return Line{}, ErrSessionNotFound
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	if err := lockCheckoutSessionOpenTx(ctx, tx, tenantID, regionID, line.CheckoutID); err != nil {
+		return Line{}, err
 	}
-	if status != "open" {
-		return Line{}, ErrSessionNotOpen
+
+	stockItemID, err := resolveStockItemID(ctx, tx, tenantID, regionID, line)
+	if err != nil {
+		return Line{}, err
 	}
+
+	var existingResID, existingStockID string
+	exErr := tx.QueryRowContext(ctx, `
+SELECT id, stock_item_id
+FROM stock_reservations
+WHERE tenant_id = $1 AND region_id = $2 AND checkout_id = $3 AND checkout_line_id = $4
+FOR UPDATE
+`, tenantID, regionID, line.CheckoutID, line.ID).Scan(&existingResID, &existingStockID)
+	hasExisting := exErr == nil
+	if exErr != nil && !errors.Is(exErr, sql.ErrNoRows) {
+		return Line{}, exErr
+	}
+
+	lockIDs := []string{stockItemID}
+	if hasExisting && existingStockID != stockItemID {
+		lockIDs = append(lockIDs, existingStockID)
+	}
+	lockIDs = sortedUniqueNonEmpty(lockIDs)
+
+	quantities := make(map[string]int64, len(lockIDs))
+	for _, sid := range lockIDs {
+		var q int64
+		serr := tx.QueryRowContext(ctx, `
+SELECT quantity FROM stock_items WHERE tenant_id = $1 AND region_id = $2 AND id = $3 FOR UPDATE
+`, tenantID, regionID, sid).Scan(&q)
+		if errors.Is(serr, sql.ErrNoRows) {
+			return Line{}, ErrInsufficientStock
+		}
+		if serr != nil {
+			return Line{}, serr
+		}
+		quantities[sid] = q
+	}
+
+	if hasExisting && existingStockID != stockItemID {
+		if _, derr := tx.ExecContext(ctx, `DELETE FROM stock_reservations WHERE id = $1`, existingResID); derr != nil {
+			return Line{}, derr
+		}
+	}
+
+	var sumOther int64
+	if serr := tx.QueryRowContext(ctx, `
+SELECT COALESCE(SUM(quantity), 0)
+FROM stock_reservations
+WHERE tenant_id = $1 AND region_id = $2 AND stock_item_id = $3
+  AND expires_at > NOW()
+  AND NOT (checkout_id = $4 AND checkout_line_id = $5)
+`, tenantID, regionID, stockItemID, line.CheckoutID, line.ID).Scan(&sumOther); serr != nil {
+		return Line{}, serr
+	}
+
+	onHand := quantities[stockItemID]
+	if sumOther+line.Quantity > onHand {
+		return Line{}, ErrInsufficientStock
+	}
+
+	if hasExisting && existingStockID == stockItemID {
+		if _, derr := tx.ExecContext(ctx, `DELETE FROM stock_reservations WHERE id = $1`, existingResID); derr != nil {
+			return Line{}, derr
+		}
+	}
+
+	if _, ierr := tx.ExecContext(ctx, `
+INSERT INTO stock_reservations (id, tenant_id, region_id, checkout_id, checkout_line_id, stock_item_id, quantity, expires_at, created_at, updated_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7, NOW() + INTERVAL '168 hours', NOW(), NOW())
+`, utils.NewID("rsv"), tenantID, regionID, line.CheckoutID, line.ID, stockItemID, line.Quantity); ierr != nil {
+		return Line{}, ierr
+	}
+
 	if line.ID != "" {
-		row := r.db.QueryRowContext(ctx, `
+		row := tx.QueryRowContext(ctx, `
 UPDATE checkout_lines
 SET product_id = NULLIF($6,''), variant_id = NULLIF($7,''), quantity = $4, unit_price_cents = $5, currency = $8, updated_at = NOW()
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND checkout_id = $9
@@ -82,15 +158,18 @@ WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND checkout_id = $9
   )
 RETURNING id, checkout_id, COALESCE(product_id,''), COALESCE(variant_id,''), quantity, unit_price_cents, currency
 `, line.ID, tenantID, regionID, line.Quantity, line.UnitPriceCents, line.ProductID, line.VariantID, line.Currency, line.CheckoutID)
-		out, err := scanLine(row)
-		if err == nil {
+		out, lerr := scanLine(row)
+		if lerr == nil {
+			if cerr := tx.Commit(); cerr != nil {
+				return Line{}, cerr
+			}
 			return out, nil
 		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return Line{}, err
+		if !errors.Is(lerr, sql.ErrNoRows) {
+			return Line{}, lerr
 		}
 	}
-	row := r.db.QueryRowContext(ctx, `
+	row := tx.QueryRowContext(ctx, `
 INSERT INTO checkout_lines (id, tenant_id, region_id, checkout_id, product_id, variant_id, quantity, unit_price_cents, currency, created_at, updated_at)
 SELECT $1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),$7,$8,$9,NOW(),NOW()
 WHERE EXISTS (
@@ -100,19 +179,58 @@ WHERE EXISTS (
 RETURNING id, checkout_id, COALESCE(product_id,''), COALESCE(variant_id,''), quantity, unit_price_cents, currency
 `, line.ID, tenantID, regionID, line.CheckoutID, line.ProductID, line.VariantID, line.Quantity, line.UnitPriceCents, line.Currency)
 	out, err := scanLine(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			status, found, statusErr := r.sessionStatus(ctx, tenantID, regionID, line.CheckoutID)
+			if statusErr != nil {
+				return Line{}, statusErr
+			}
+			if !found {
+				return Line{}, ErrSessionNotFound
+			}
+			if status != "open" {
+				return Line{}, ErrSessionNotOpen
+			}
+		}
+		return Line{}, err
+	}
+	if cerr := tx.Commit(); cerr != nil {
+		return Line{}, cerr
+	}
+	return out, nil
+}
+
+func lockCheckoutSessionOpenTx(ctx context.Context, tx *sql.Tx, tenantID, regionID, checkoutID string) error {
+	var status string
+	err := tx.QueryRowContext(ctx, `
+SELECT status FROM checkout_sessions WHERE id = $1 AND tenant_id = $2 AND region_id = $3 FOR UPDATE
+`, checkoutID, tenantID, regionID).Scan(&status)
 	if errors.Is(err, sql.ErrNoRows) {
-		status, found, statusErr := r.sessionStatus(ctx, tenantID, regionID, line.CheckoutID)
-		if statusErr != nil {
-			return Line{}, statusErr
-		}
-		if !found {
-			return Line{}, ErrSessionNotFound
-		}
-		if status != "open" {
-			return Line{}, ErrSessionNotOpen
+		return ErrSessionNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if status != "open" {
+		return ErrSessionNotOpen
+	}
+	return nil
+}
+
+func sortedUniqueNonEmpty(ss []string) []string {
+	seen := make(map[string]struct{})
+	for _, s := range ss {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			seen[s] = struct{}{}
 		}
 	}
-	return out, err
+	out := make([]string, 0, len(seen))
+	for s := range seen {
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (r *PostgresRepository) UpdateSessionContext(ctx context.Context, tenantID, regionID, checkoutID string, in Session) (Session, error) {
@@ -603,20 +721,30 @@ WHERE checkout_id = $1 AND tenant_id = $2 AND region_id = $3
 		requiredByStockItem[stockItemID] += l.Quantity
 	}
 	for stockItemID, required := range requiredByStockItem {
-		var available int64
+		var onHand int64
 		row := tx.QueryRowContext(ctx, `
 SELECT quantity
 FROM stock_items
 WHERE tenant_id = $1 AND region_id = $2 AND id = $3
 FOR UPDATE
 `, tenantID, regionID, stockItemID)
-		if scanErr := row.Scan(&available); scanErr != nil {
+		if scanErr := row.Scan(&onHand); scanErr != nil {
 			if errors.Is(scanErr, sql.ErrNoRows) {
 				return OrderCreatedPayload{}, ErrInsufficientStock
 			}
 			return OrderCreatedPayload{}, scanErr
 		}
-		if available < required {
+		var othersReserved int64
+		if scanErr := tx.QueryRowContext(ctx, `
+SELECT COALESCE(SUM(quantity), 0)
+FROM stock_reservations
+WHERE tenant_id = $1 AND region_id = $2 AND stock_item_id = $3
+  AND checkout_id <> $4
+  AND expires_at > NOW()
+`, tenantID, regionID, stockItemID, checkoutID).Scan(&othersReserved); scanErr != nil {
+			return OrderCreatedPayload{}, scanErr
+		}
+		if onHand < othersReserved+required {
 			return OrderCreatedPayload{}, ErrInsufficientStock
 		}
 		if _, err = tx.ExecContext(ctx, `
@@ -624,6 +752,12 @@ UPDATE stock_items
 SET quantity = quantity - $4, updated_at = NOW()
 WHERE tenant_id = $1 AND region_id = $2 AND id = $3
 `, tenantID, regionID, stockItemID, required); err != nil {
+			return OrderCreatedPayload{}, err
+		}
+		if _, err = tx.ExecContext(ctx, `
+DELETE FROM stock_reservations
+WHERE tenant_id = $1 AND region_id = $2 AND checkout_id = $3 AND stock_item_id = $4
+`, tenantID, regionID, checkoutID, stockItemID); err != nil {
 			return OrderCreatedPayload{}, err
 		}
 		if _, err = tx.ExecContext(ctx, `

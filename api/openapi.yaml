@@ -933,6 +933,7 @@ paths:
     put:
       operationId: put_checkouts_sessions_by_checkout_id_lines
       summary: Upsert checkout line
+      description: Resolves inventory for the variant or product, then reserves salable quantity for this line (soft hold) while the session stays open.
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/RegionHeader"
@@ -961,6 +962,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Checkout not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Checkout not open, channel/listing conflict, or insufficient salable stock (including stock held on other open checkouts)
           content:
             application/json:
               schema:

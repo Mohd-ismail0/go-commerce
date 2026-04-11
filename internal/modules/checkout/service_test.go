@@ -535,6 +535,27 @@ func TestUpsertLineRejectsCompletedSession(t *testing.T) {
 	}
 }
 
+func TestUpsertLineMapsInsufficientStockToConflict(t *testing.T) {
+	repo := &fakeRepo{upsertErr: ErrInsufficientStock, session: Session{ID: "chk_1", Status: "open", Currency: "USD"}}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	_, err := svc.UpsertLine(context.Background(), "tenant_a", "us", Line{
+		ID:             "ln_1",
+		CheckoutID:     "chk_1",
+		VariantID:      "var_ok",
+		ProductID:      "prd_ok",
+		Quantity:       1,
+		UnitPriceCents: 1200,
+		Currency:       "USD",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	apiErr, ok := err.(sharederrors.APIError)
+	if !ok || apiErr.Status != 409 {
+		t.Fatalf("expected 409 API error, got %#v", err)
+	}
+}
+
 func TestUpsertLineMapsRepositorySessionNotOpenToConflict(t *testing.T) {
 	repo := &fakeRepo{
 		upsertErr: ErrSessionNotOpen,

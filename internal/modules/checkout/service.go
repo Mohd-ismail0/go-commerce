@@ -120,6 +120,9 @@ func (s *Service) UpsertLine(ctx context.Context, tenantID, regionID string, in 
 		if errors.Is(err, ErrSessionNotOpen) {
 			return Line{}, sharederrors.Conflict(err.Error())
 		}
+		if errors.Is(err, ErrInsufficientStock) {
+			return Line{}, sharederrors.Conflict(err.Error())
+		}
 		return Line{}, sharederrors.Internal("failed to save checkout line")
 	}
 	return line, nil

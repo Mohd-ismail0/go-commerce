@@ -11,7 +11,7 @@ This matrix tracks **functional parity** between Saleor (GraphQL-first reference
 
 Primary references: `docs/saleor_mapping.md`, `api/openapi.yaml`, `internal/modules/*`, `internal/app/app.go`.
 
-_Last updated: fulfillments OpenAPI + transactional create with idempotency and `order.completed` emission (non-replay only)._
+_Last updated: checkout line stock reservations + `Complete` stock checks accounting for other carts._
 
 ## API contract vs router
 
@@ -28,7 +28,7 @@ _Last updated: fulfillments OpenAPI + transactional create with idempotency and 
 | Checkout session lifecycle | **Partial** | Create/get/update context, lines upsert, `recalculate`, `complete`. Open/non-open immutability enforced. |
 | Atomic totals refresh | **Full** | `Recalculate`: `FOR UPDATE` on open session; subtotal, shipping, tax/total in **one transaction**. |
 | Shipping method on checkout | **Partial** | Method id + country/postal on session; eligibility via `shipping_methods` rules (channels, postal prefixes, min/max order). |
-| Stock reservation per line | **Gap** | Saleor allocates/reserves stock through checkout; rewrite validates listings/prices on upsert but does not mirror full reservation lifecycle. |
+| Stock reservation per line | **Partial** | `PUT` checkout line acquires a **soft reservation** (`stock_reservations` per `checkout_line_id`, 7d TTL) under `SELECT FOR UPDATE` on session + stock; salable qty = `stock_items.quantity` minus other active reservations. `Complete` deducts stock, clears this checkout’s reservations, and requires `on_hand >= other_checkouts’ reservations + line demand`. No multi-warehouse optimizer beyond `resolveStockItemID`. |
 | Multiple shipping / split deliveries | **Gap** | Single shipping context on session. |
 | Gift cards | **Gap** | Not modeled in rewrite checkout/pricing paths. |
 | Checkout “problems” / errors collection | **Gap** | No Saleor-style aggregated checkout error list API. |
@@ -75,7 +75,7 @@ _Last updated: fulfillments OpenAPI + transactional create with idempotency and 
 
 | Capability | Status | Rewrite notes |
 | --- | --- | --- |
-| Stock items list/save | **Partial** | Simple stock rows; not full warehouse graph, allocations, or reservations UI. |
+| Stock items list/save | **Partial** | Simple stock rows; checkout integrates via `stock_reservations` + `stock_allocations` on complete; no admin UI for reservations. |
 | Multi-warehouse allocation | **Gap** | No Saleor `Warehouse`/`Allocation` parity in API. |
 
 ## Pricing, tax, promotions
