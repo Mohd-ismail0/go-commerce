@@ -2,6 +2,7 @@ package checkout
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,13 +12,15 @@ import (
 )
 
 type fakeRepo struct {
-	completed      bool
-	session        Session
-	completeErr    error
-	lines          []Line
-	paymentCovered bool
-	upsertErr      error
-	updateCtxErr   error
+	completed         bool
+	session           Session
+	completeErr       error
+	lines             []Line
+	paymentCovered    bool
+	upsertErr         error
+	updateCtxErr      error
+	updateShippingErr error
+	updatePricingErr  error
 }
 
 func (f *fakeRepo) CreateSession(_ context.Context, in Session) (Session, error) {
@@ -102,23 +105,67 @@ func (f *fakeRepo) UpdateSessionContext(_ context.Context, _, _, checkoutID stri
 	return in, nil
 }
 
-func (f *fakeRepo) Recalculate(_ context.Context, _, _, checkoutID string) (Session, error) {
-	if f.session.ID == "" {
-		f.session = Session{ID: checkoutID, Status: "open", Currency: "USD", SubtotalCents: 1000, ShippingCents: 200, TotalCents: 1200}
+func (f *fakeRepo) Recalculate(ctx context.Context, _, _, checkoutID string, opts *RecalculateOptions) (Session, error) {
+	s := f.session
+	if s.ID == "" {
+		s = Session{ID: checkoutID, Status: "open", Currency: "USD", SubtotalCents: 1000, ShippingCents: 200, TotalCents: 1200}
 	}
-	if f.session.Status == "" {
-		f.session.Status = "open"
+	s.ID = checkoutID
+	if s.Status == "" {
+		s.Status = "open"
 	}
-	if f.session.Currency == "" {
-		f.session.Currency = "USD"
+	if s.Currency == "" {
+		s.Currency = "USD"
 	}
-	if f.session.SubtotalCents == 0 {
-		f.session.SubtotalCents = 1000
+	if s.SubtotalCents == 0 {
+		s.SubtotalCents = 1000
 	}
-	return f.session, nil
+	if s.Status != "open" {
+		return Session{}, ErrSessionNotOpen
+	}
+	if opts == nil || opts.ComputePricing == nil {
+		f.session = s
+		return s, nil
+	}
+	session := s
+	var shippingCents int64
+	if strings.TrimSpace(session.ShippingMethodID) != "" {
+		if strings.TrimSpace(session.ShippingAddressCountry) == "" {
+			return Session{}, ErrShippingAddressCountryRequired
+		}
+		price, ok, _ := f.ResolveShippingMethodPrice(ctx, "", "", session.ShippingMethodID, session.ShippingAddressCountry, session.ChannelID, session.ShippingAddressPostalCode, session.Currency, session.SubtotalCents)
+		if !ok {
+			return Session{}, ErrShippingMethodNotEligible
+		}
+		if f.updateShippingErr != nil {
+			return Session{}, f.updateShippingErr
+		}
+		shippingCents = price
+	} else if session.ShippingCents != 0 {
+		if f.updateShippingErr != nil {
+			return Session{}, f.updateShippingErr
+		}
+		shippingCents = 0
+	}
+	session.ShippingCents = shippingCents
+	baseAmount := session.SubtotalCents + session.ShippingCents
+	taxCents, totalCents, pErr := opts.ComputePricing(ctx, session, baseAmount)
+	if pErr != nil {
+		return Session{}, pErr
+	}
+	if f.updatePricingErr != nil {
+		return Session{}, f.updatePricingErr
+	}
+	session.TaxCents = taxCents
+	session.TotalCents = totalCents
+	f.session = session
+	return session, nil
 }
 
 func (f *fakeRepo) UpdatePricing(_ context.Context, _, _, checkoutID string, taxCents, totalCents int64) (Session, error) {
+	if f.updatePricingErr != nil {
+		return Session{}, f.updatePricingErr
+	}
 	shippingCents := f.session.ShippingCents
 	if shippingCents == 0 {
 		shippingCents = 200
@@ -137,6 +184,9 @@ func (f *fakeRepo) ResolveShippingMethodPrice(_ context.Context, _, _, shippingM
 }
 
 func (f *fakeRepo) UpdateShippingCents(_ context.Context, _, _, checkoutID string, shippingCents int64) (Session, error) {
+	if f.updateShippingErr != nil {
+		return Session{}, f.updateShippingErr
+	}
 	f.session.ShippingCents = shippingCents
 	f.session.ID = checkoutID
 	if f.session.Status == "" {
@@ -290,6 +340,48 @@ func TestRecalculateAppliesEligibleShippingMethod(t *testing.T) {
 	}
 	if updated.ShippingCents != 250 {
 		t.Fatalf("expected shipping cents to be 250, got %d", updated.ShippingCents)
+	}
+}
+
+func TestRecalculateMapsUpdateShippingSessionNotOpenToConflict(t *testing.T) {
+	repo := &fakeRepo{
+		updateShippingErr: ErrSessionNotOpen,
+		session: Session{
+			ID:                     "chk_1",
+			Status:                 "open",
+			Currency:               "USD",
+			ShippingMethodID:       "ship_std",
+			ShippingAddressCountry: "US",
+		},
+	}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	_, err := svc.Recalculate(context.Background(), "tenant_a", "us", "chk_1")
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	apiErr, ok := err.(sharederrors.APIError)
+	if !ok || apiErr.Status != 409 {
+		t.Fatalf("expected 409 API error, got %#v", err)
+	}
+}
+
+func TestRecalculateMapsUpdatePricingSessionNotOpenToConflict(t *testing.T) {
+	repo := &fakeRepo{
+		updatePricingErr: ErrSessionNotOpen,
+		session: Session{
+			ID:       "chk_1",
+			Status:   "open",
+			Currency: "USD",
+		},
+	}
+	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
+	_, err := svc.Recalculate(context.Background(), "tenant_a", "us", "chk_1")
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	apiErr, ok := err.(sharederrors.APIError)
+	if !ok || apiErr.Status != 409 {
+		t.Fatalf("expected 409 API error, got %#v", err)
 	}
 }
 

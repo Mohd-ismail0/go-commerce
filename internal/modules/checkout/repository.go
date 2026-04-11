@@ -17,6 +17,13 @@ var ErrCheckoutEmpty = errors.New("checkout has no lines")
 var ErrInsufficientStock = errors.New("insufficient stock for checkout line")
 var ErrVoucherUnavailable = errors.New("voucher is unavailable")
 var ErrChannelListingMismatch = errors.New("checkout line no longer matches channel listing")
+var ErrShippingAddressCountryRequired = errors.New("shipping_address_country is required when shipping_method_id is set")
+var ErrShippingMethodNotEligible = errors.New("selected shipping method is not eligible for checkout context")
+
+// RecalculateOptions configures transactional checkout recalculation when a pricing engine is available.
+type RecalculateOptions struct {
+	ComputePricing func(ctx context.Context, session Session, baseAmountCents int64) (taxCents, totalCents int64, err error)
+}
 
 type Repository interface {
 	CreateSession(ctx context.Context, in Session) (Session, error)
@@ -31,7 +38,7 @@ type Repository interface {
 	ResolveShippingMethodPrice(ctx context.Context, tenantID, regionID, shippingMethodID, countryCode, channelID, postalCode, currency string, subtotalCents int64) (int64, bool, error)
 	UpdateShippingCents(ctx context.Context, tenantID, regionID, checkoutID string, shippingCents int64) (Session, error)
 	HasAuthorizedPaymentCoverage(ctx context.Context, tenantID, regionID, checkoutID string, requiredTotalCents int64) (bool, error)
-	Recalculate(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error)
+	Recalculate(ctx context.Context, tenantID, regionID, checkoutID string, opts *RecalculateOptions) (Session, error)
 	UpdatePricing(ctx context.Context, tenantID, regionID, checkoutID string, taxCents, totalCents int64) (Session, error)
 	Complete(ctx context.Context, tenantID, regionID, checkoutID, orderID string) (OrderCreatedPayload, error)
 }
@@ -141,25 +148,181 @@ WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 	return r.getSession(ctx, tenantID, regionID, checkoutID)
 }
 
-func (r *PostgresRepository) Recalculate(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error) {
-	if !r.sessionExists(ctx, tenantID, regionID, checkoutID) {
-		return Session{}, ErrSessionNotFound
-	}
-	_, err := r.db.ExecContext(ctx, `
-UPDATE checkout_sessions
-SET subtotal_cents = COALESCE((SELECT SUM(quantity * unit_price_cents) FROM checkout_lines WHERE checkout_id = $1 AND tenant_id = $2 AND region_id = $3), 0),
-    total_cents = COALESCE((SELECT SUM(quantity * unit_price_cents) FROM checkout_lines WHERE checkout_id = $1 AND tenant_id = $2 AND region_id = $3), 0)
-WHERE id = $1 AND tenant_id = $2 AND region_id = $3
-`, checkoutID, tenantID, regionID)
+func (r *PostgresRepository) Recalculate(ctx context.Context, tenantID, regionID, checkoutID string, opts *RecalculateOptions) (Session, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Session{}, err
 	}
-	return r.getSession(ctx, tenantID, regionID, checkoutID)
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	lockRow := tx.QueryRowContext(ctx, `
+SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+FROM checkout_sessions
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND status = 'open'
+FOR UPDATE
+`, checkoutID, tenantID, regionID)
+	var locked Session
+	if err := scanSessionInto(lockRow, &locked); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			status, found, sErr := r.sessionStatus(ctx, tenantID, regionID, checkoutID)
+			if sErr != nil {
+				return Session{}, sErr
+			}
+			if !found {
+				return Session{}, ErrSessionNotFound
+			}
+			if status != "open" {
+				return Session{}, ErrSessionNotOpen
+			}
+			return Session{}, ErrSessionNotFound
+		}
+		return Session{}, err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+UPDATE checkout_sessions
+SET subtotal_cents = COALESCE((SELECT SUM(quantity * unit_price_cents) FROM checkout_lines WHERE checkout_id = $1 AND tenant_id = $2 AND region_id = $3), 0),
+    total_cents = COALESCE((SELECT SUM(quantity * unit_price_cents) FROM checkout_lines WHERE checkout_id = $1 AND tenant_id = $2 AND region_id = $3), 0)
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND status = 'open'
+`, checkoutID, tenantID, regionID); err != nil {
+		return Session{}, err
+	}
+
+	if opts == nil || opts.ComputePricing == nil {
+		row := tx.QueryRowContext(ctx, `
+SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+FROM checkout_sessions
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+`, checkoutID, tenantID, regionID)
+		var out Session
+		if err := scanSessionInto(row, &out); err != nil {
+			return Session{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return Session{}, err
+		}
+		return out, nil
+	}
+
+	row := tx.QueryRowContext(ctx, `
+SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+FROM checkout_sessions
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+`, checkoutID, tenantID, regionID)
+	var session Session
+	if err := scanSessionInto(row, &session); err != nil {
+		return Session{}, err
+	}
+
+	var shippingCents int64
+	if strings.TrimSpace(session.ShippingMethodID) != "" {
+		if strings.TrimSpace(session.ShippingAddressCountry) == "" {
+			return Session{}, ErrShippingAddressCountryRequired
+		}
+		price, ok, sErr := resolveShippingMethodPriceTx(ctx, tx, tenantID, regionID, session.ShippingMethodID, session.ShippingAddressCountry, session.ChannelID, session.ShippingAddressPostalCode, session.Currency, session.SubtotalCents)
+		if sErr != nil {
+			return Session{}, sErr
+		}
+		if !ok {
+			return Session{}, ErrShippingMethodNotEligible
+		}
+		shippingCents = price
+	} else if session.ShippingCents != 0 {
+		shippingCents = 0
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+UPDATE checkout_sessions
+SET shipping_cents = $4,
+    total_cents = subtotal_cents + $4,
+    updated_at = NOW()
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND status = 'open'
+`, checkoutID, tenantID, regionID, shippingCents); err != nil {
+		return Session{}, err
+	}
+
+	row2 := tx.QueryRowContext(ctx, `
+SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+FROM checkout_sessions
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+`, checkoutID, tenantID, regionID)
+	if err := scanSessionInto(row2, &session); err != nil {
+		return Session{}, err
+	}
+
+	baseAmount := session.SubtotalCents + session.ShippingCents
+	taxCents, totalCents, pErr := opts.ComputePricing(ctx, session, baseAmount)
+	if pErr != nil {
+		return Session{}, pErr
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+UPDATE checkout_sessions
+SET tax_cents = $4, total_cents = $5, updated_at = NOW()
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3 AND status = 'open'
+`, checkoutID, tenantID, regionID, taxCents, totalCents); err != nil {
+		return Session{}, err
+	}
+
+	row3 := tx.QueryRowContext(ctx, `
+SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+FROM checkout_sessions
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+`, checkoutID, tenantID, regionID)
+	var out Session
+	if err := scanSessionInto(row3, &out); err != nil {
+		return Session{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Session{}, err
+	}
+	return out, nil
 }
 
 func (r *PostgresRepository) ResolveShippingMethodPrice(ctx context.Context, tenantID, regionID, shippingMethodID, countryCode, channelID, postalCode, currency string, subtotalCents int64) (int64, bool, error) {
 	var price int64
 	err := r.db.QueryRowContext(ctx, `
+SELECT m.price_cents
+FROM shipping_methods m
+JOIN shipping_zones z ON z.id = m.shipping_zone_id AND z.tenant_id = m.tenant_id AND z.region_id = m.region_id
+WHERE m.tenant_id = $1
+  AND m.region_id = $2
+  AND m.id = $3
+  AND UPPER(m.currency) = UPPER($4)
+  AND (
+    jsonb_array_length(COALESCE(m.channel_ids, '[]'::jsonb)) = 0
+    OR COALESCE(m.channel_ids, '[]'::jsonb) @> to_jsonb(ARRAY[$5]::text[])
+  )
+  AND (
+    jsonb_array_length(COALESCE(m.postal_prefixes, '[]'::jsonb)) = 0
+    OR EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements_text(COALESCE(m.postal_prefixes, '[]'::jsonb)) pref(value)
+      WHERE UPPER($6) LIKE UPPER(pref.value) || '%'
+    )
+  )
+  AND ($7 >= COALESCE(m.min_order_cents, 0))
+  AND ($7 <= COALESCE(m.max_order_cents, 9223372036854775807))
+  AND EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements_text(COALESCE(z.countries, '[]'::jsonb)) country(value)
+    WHERE UPPER(country.value) = UPPER($8)
+  )
+`, tenantID, regionID, shippingMethodID, currency, channelID, postalCode, subtotalCents, countryCode).Scan(&price)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return price, true, nil
+}
+
+func resolveShippingMethodPriceTx(ctx context.Context, tx *sql.Tx, tenantID, regionID, shippingMethodID, countryCode, channelID, postalCode, currency string, subtotalCents int64) (int64, bool, error) {
+	var price int64
+	err := tx.QueryRowContext(ctx, `
 SELECT m.price_cents
 FROM shipping_methods m
 JOIN shipping_zones z ON z.id = m.shipping_zone_id AND z.tenant_id = m.tenant_id AND z.region_id = m.region_id
@@ -203,11 +366,22 @@ SET shipping_cents = $4,
     total_cents = subtotal_cents + $4,
     updated_at = NOW()
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+  AND status = 'open'
 `, checkoutID, tenantID, regionID, shippingCents)
 	if err != nil {
 		return Session{}, err
 	}
 	if rows, _ := res.RowsAffected(); rows == 0 {
+		status, found, statusErr := r.sessionStatus(ctx, tenantID, regionID, checkoutID)
+		if statusErr != nil {
+			return Session{}, statusErr
+		}
+		if !found {
+			return Session{}, ErrSessionNotFound
+		}
+		if status != "open" {
+			return Session{}, ErrSessionNotOpen
+		}
 		return Session{}, ErrSessionNotFound
 	}
 	return r.getSession(ctx, tenantID, regionID, checkoutID)
@@ -230,13 +404,27 @@ WHERE tenant_id = $1
 }
 
 func (r *PostgresRepository) UpdatePricing(ctx context.Context, tenantID, regionID, checkoutID string, taxCents, totalCents int64) (Session, error) {
-	_, err := r.db.ExecContext(ctx, `
+	res, err := r.db.ExecContext(ctx, `
 UPDATE checkout_sessions
 SET tax_cents = $4, total_cents = $5, updated_at = NOW()
 WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+  AND status = 'open'
 `, checkoutID, tenantID, regionID, taxCents, totalCents)
 	if err != nil {
 		return Session{}, err
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		status, found, statusErr := r.sessionStatus(ctx, tenantID, regionID, checkoutID)
+		if statusErr != nil {
+			return Session{}, statusErr
+		}
+		if !found {
+			return Session{}, ErrSessionNotFound
+		}
+		if status != "open" {
+			return Session{}, ErrSessionNotOpen
+		}
+		return Session{}, ErrSessionNotFound
 	}
 	return r.getSession(ctx, tenantID, regionID, checkoutID)
 }
