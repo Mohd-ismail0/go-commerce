@@ -1840,14 +1840,6 @@ WHERE tenant_id = $1 AND region_id = $2 AND channel_id = $3 AND product_id = $4
 	return true, nil
 }
 
-func (r *PostgresRepository) sessionExists(ctx context.Context, tenantID, regionID, checkoutID string) bool {
-	var found int
-	err := r.db.QueryRowContext(ctx, `
-SELECT 1 FROM checkout_sessions WHERE id = $1 AND tenant_id = $2 AND region_id = $3
-`, checkoutID, tenantID, regionID).Scan(&found)
-	return err == nil
-}
-
 func (r *PostgresRepository) sessionStatus(ctx context.Context, tenantID, regionID, checkoutID string) (string, bool, error) {
 	var status string
 	err := r.db.QueryRowContext(ctx, `
