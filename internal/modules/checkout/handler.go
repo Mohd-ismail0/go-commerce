@@ -155,6 +155,11 @@ func (h *Handler) updateSessionContext(w http.ResponseWriter, r *http.Request) {
 		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "invalid body"})
 		return
 	}
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" {
+		utils.JSON(w, http.StatusBadRequest, map[string]any{"code": "bad_request", "message": "Idempotency-Key header is required"})
+		return
+	}
 	updated, err := h.svc.UpdateSessionContext(
 		r.Context(),
 		middleware.TenantIDFromContext(r.Context()),
@@ -172,6 +177,7 @@ func (h *Handler) updateSessionContext(w http.ResponseWriter, r *http.Request) {
 			BillingAddressCountry:     req.BillingAddressCountry,
 			BillingAddressPostalCode:  req.BillingAddressPostalCode,
 		},
+		idempotencyKey,
 	)
 	if err != nil {
 		utils.WriteError(w, err)

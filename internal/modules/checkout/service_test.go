@@ -28,6 +28,7 @@ type fakeRepo struct {
 	completePayloadByIdem map[string]OrderCreatedPayload
 	lineUpsertIdem        map[string]Line
 	recalcIdem            map[string]Session
+	patchCtxIdem          map[string]Session
 }
 
 func (f *fakeRepo) CreateSession(_ context.Context, in Session, idempotencyKey string) (Session, error) {
@@ -165,15 +166,30 @@ func (f *fakeRepo) ApplyCustomerAddressesToCheckout(_ context.Context, tenantID,
 	return s, nil
 }
 
-func (f *fakeRepo) UpdateSessionContext(_ context.Context, _, _, checkoutID string, in Session) (Session, error) {
+func (f *fakeRepo) UpdateSessionContext(_ context.Context, tenantID, _, checkoutID string, in Session, idempotencyKey string) (Session, error) {
+	key := strings.TrimSpace(idempotencyKey)
+	if key == "" {
+		return Session{}, ErrCheckoutPatchSessionIdempotencyKeyRequired
+	}
 	if f.updateCtxErr != nil {
 		return Session{}, f.updateCtxErr
+	}
+	idemK := tenantID + "|" + checkoutPatchSessionScope(checkoutID) + "|" + key
+	if f.patchCtxIdem != nil {
+		if prev, ok := f.patchCtxIdem[idemK]; ok {
+			return prev, nil
+		}
 	}
 	in.ID = checkoutID
 	in.Currency = "USD"
 	in.SubtotalCents = 1000
 	in.ShippingCents = 200
-	return in, nil
+	out := in
+	if f.patchCtxIdem == nil {
+		f.patchCtxIdem = make(map[string]Session)
+	}
+	f.patchCtxIdem[idemK] = out
+	return out, nil
 }
 
 func (f *fakeRepo) Recalculate(ctx context.Context, tenantID, _, checkoutID string, opts *RecalculateOptions, idempotencyKey string) (Session, error) {
@@ -621,7 +637,7 @@ func TestUpdateSessionContextRecalculatesTotals(t *testing.T) {
 	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
 	updated, err := svc.UpdateSessionContext(context.Background(), "tenant_a", "us", "chk_1", Session{
 		VoucherCode: "SAVE10",
-	})
+	}, "idem_patch_recalc")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -912,7 +928,7 @@ func TestUpdateSessionContextRejectsChannelSwitchWithIncompatibleLines(t *testin
 		},
 	}
 	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
-	_, err := svc.UpdateSessionContext(context.Background(), "tenant_a", "us", "chk_1", Session{ChannelID: "pos"})
+	_, err := svc.UpdateSessionContext(context.Background(), "tenant_a", "us", "chk_1", Session{ChannelID: "pos"}, "idem_patch_ch_bad")
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -930,7 +946,7 @@ func TestUpdateSessionContextAllowsCompatibleChannelSwitch(t *testing.T) {
 		},
 	}
 	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
-	updated, err := svc.UpdateSessionContext(context.Background(), "tenant_a", "us", "chk_1", Session{ChannelID: "web"})
+	updated, err := svc.UpdateSessionContext(context.Background(), "tenant_a", "us", "chk_1", Session{ChannelID: "web"}, "idem_patch_ch_ok")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -946,7 +962,7 @@ func TestUpdateSessionContextRejectsCompletedSession(t *testing.T) {
 	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
 	_, err := svc.UpdateSessionContext(context.Background(), "tenant_a", "us", "chk_1", Session{
 		VoucherCode: "SAVE10",
-	})
+	}, "idem_patch_completed")
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -964,13 +980,47 @@ func TestUpdateSessionContextMapsRepositorySessionNotOpenToConflict(t *testing.T
 	svc := NewService(repo, events.NewBus(), &fakeCalculator{})
 	_, err := svc.UpdateSessionContext(context.Background(), "tenant_a", "us", "chk_1", Session{
 		VoucherCode: "SAVE10",
-	})
+	}, "idem_patch_not_open")
 	if err == nil {
 		t.Fatalf("expected error")
 	}
 	apiErr, ok := err.(sharederrors.APIError)
 	if !ok || apiErr.Status != 409 {
 		t.Fatalf("expected 409 API error, got %#v", err)
+	}
+}
+
+func TestUpdateSessionContextRequiresIdempotencyKey(t *testing.T) {
+	svc := NewService(&fakeRepo{}, events.NewBus(), &fakeCalculator{})
+	_, err := svc.UpdateSessionContext(context.Background(), "tenant_a", "us", "chk_1", Session{
+		VoucherCode: "SAVE10",
+	}, "  ")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	apiErr, ok := err.(sharederrors.APIError)
+	if !ok || apiErr.Status != 400 {
+		t.Fatalf("expected 400 API error, got %#v", err)
+	}
+}
+
+func TestUpdateSessionContextIdempotentReplayReturnsFirstPayload(t *testing.T) {
+	repo := &fakeRepo{session: Session{ID: "chk_1", ChannelID: "web", Currency: "USD"}}
+	svc := NewService(repo, events.NewBus(), nil)
+	first, err := svc.UpdateSessionContext(context.Background(), "tenant_a", "us", "chk_1", Session{
+		VoucherCode: "FIRST",
+	}, "same-patch-key")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	second, err := svc.UpdateSessionContext(context.Background(), "tenant_a", "us", "chk_1", Session{
+		VoucherCode: "SECOND",
+	}, "same-patch-key")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if first.VoucherCode != second.VoucherCode || first.VoucherCode != "FIRST" {
+		t.Fatalf("expected idempotent replay of first patch, first=%+v second=%+v", first, second)
 	}
 }
 

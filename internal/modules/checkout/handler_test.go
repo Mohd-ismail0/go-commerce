@@ -11,6 +11,23 @@ import (
 	"rewrite/internal/shared/middleware"
 )
 
+func TestCheckoutPatchSessionRequiresIdempotencyKey(t *testing.T) {
+	h := NewHandler(NewService(&fakeRepo{}, events.NewBus(), nil))
+	r := chi.NewRouter()
+	r.Use(middleware.TenantRegion("public", "global"))
+	h.RegisterRoutes(r)
+
+	req := httptest.NewRequest(http.MethodPatch, "/checkouts/sessions/chk_1", bytes.NewBufferString(`{"voucher_code":"SAVE10"}`))
+	req.Header.Set("X-Tenant-ID", "tenant_a")
+	req.Header.Set("X-Region-ID", "global")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", rr.Code)
+	}
+}
+
 func TestCheckoutCreateRequiresIdempotencyKey(t *testing.T) {
 	h := NewHandler(NewService(&fakeRepo{}, events.NewBus(), nil))
 	r := chi.NewRouter()

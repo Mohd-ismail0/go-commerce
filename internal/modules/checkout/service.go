@@ -189,7 +189,11 @@ func (s *Service) UpsertLine(ctx context.Context, tenantID, regionID string, in 
 	return line, nil
 }
 
-func (s *Service) UpdateSessionContext(ctx context.Context, tenantID, regionID, checkoutID string, in Session) (Session, error) {
+func (s *Service) UpdateSessionContext(ctx context.Context, tenantID, regionID, checkoutID string, in Session, idempotencyKey string) (Session, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return Session{}, sharederrors.BadRequest("Idempotency-Key is required")
+	}
+	key := strings.TrimSpace(idempotencyKey)
 	if strings.TrimSpace(checkoutID) == "" {
 		return Session{}, sharederrors.BadRequest("checkout_id is required")
 	}
@@ -251,8 +255,14 @@ func (s *Service) UpdateSessionContext(ctx context.Context, tenantID, regionID, 
 			}
 		}
 	}
-	updated, err := s.repo.UpdateSessionContext(ctx, tenantID, regionID, checkoutID, in)
+	updated, err := s.repo.UpdateSessionContext(ctx, tenantID, regionID, checkoutID, in, key)
 	if err != nil {
+		if errors.Is(err, ErrCheckoutPatchSessionIdempotencyKeyRequired) {
+			return Session{}, sharederrors.BadRequest("Idempotency-Key is required")
+		}
+		if errors.Is(err, ErrCheckoutPatchSessionIdempotencyOrphan) || errors.Is(err, ErrCheckoutPatchSessionIdempotencyMismatch) {
+			return Session{}, sharederrors.Internal("checkout patch session idempotency record is inconsistent")
+		}
 		if errors.Is(err, ErrSessionNotFound) {
 			return Session{}, sharederrors.NotFound(err.Error())
 		}

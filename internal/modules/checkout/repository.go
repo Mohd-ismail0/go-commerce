@@ -31,6 +31,10 @@ func checkoutRecalculateScope(checkoutID string) string {
 	return "checkouts.recalculate:" + checkoutID
 }
 
+func checkoutPatchSessionScope(checkoutID string) string {
+	return "checkouts.session.patch:" + checkoutID
+}
+
 var ErrSessionNotFound = errors.New("checkout session not found")
 var ErrSessionNotOpen = errors.New("checkout session is not open")
 var ErrCheckoutEmpty = errors.New("checkout has no lines")
@@ -52,6 +56,9 @@ var ErrCheckoutLineUpsertIdempotencyOrphan = errors.New("checkout line upsert id
 var ErrCheckoutLineUpsertIdempotencyMismatch = errors.New("checkout line upsert idempotency record mismatch")
 var ErrCheckoutRecalculateIdempotencyOrphan = errors.New("checkout recalculate idempotency references missing checkout session")
 var ErrCheckoutRecalculateIdempotencyMismatch = errors.New("checkout recalculate idempotency record mismatch")
+var ErrCheckoutPatchSessionIdempotencyKeyRequired = errors.New("checkout session patch idempotency key is required")
+var ErrCheckoutPatchSessionIdempotencyOrphan = errors.New("checkout session patch idempotency references missing checkout session")
+var ErrCheckoutPatchSessionIdempotencyMismatch = errors.New("checkout session patch idempotency record mismatch")
 
 // RecalculateOptions configures transactional checkout recalculation when a pricing engine is available.
 type RecalculateOptions struct {
@@ -60,7 +67,7 @@ type RecalculateOptions struct {
 
 type Repository interface {
 	CreateSession(ctx context.Context, in Session, idempotencyKey string) (Session, error)
-	UpdateSessionContext(ctx context.Context, tenantID, regionID, checkoutID string, in Session) (Session, error)
+	UpdateSessionContext(ctx context.Context, tenantID, regionID, checkoutID string, in Session, idempotencyKey string) (Session, error)
 	ApplyCustomerAddressesToCheckout(ctx context.Context, tenantID, regionID, checkoutID, shippingAddressID, billingAddressID, idempotencyKey string) (Session, error)
 	UpsertLine(ctx context.Context, tenantID, regionID string, line Line, idempotencyKey string) (Line, error)
 	GetSession(ctx context.Context, tenantID, regionID, checkoutID string) (Session, error)
@@ -385,8 +392,57 @@ func sortedUniqueNonEmpty(ss []string) []string {
 	return out
 }
 
-func (r *PostgresRepository) UpdateSessionContext(ctx context.Context, tenantID, regionID, checkoutID string, in Session) (Session, error) {
-	res, err := r.db.ExecContext(ctx, `
+func (r *PostgresRepository) UpdateSessionContext(ctx context.Context, tenantID, regionID, checkoutID string, in Session, idempotencyKey string) (Session, error) {
+	key := strings.TrimSpace(idempotencyKey)
+	if key == "" {
+		return Session{}, ErrCheckoutPatchSessionIdempotencyKeyRequired
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Session{}, err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	lockKey := tenantID + "\x00" + checkoutPatchSessionScope(checkoutID) + "\x00" + key
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1::text))`, lockKey); err != nil {
+		return Session{}, err
+	}
+	qtx := r.queries.WithTx(tx)
+	scope := checkoutPatchSessionScope(checkoutID)
+	resourceID, idemErr := qtx.GetIdempotencyResource(ctx, dbsqlc.GetIdempotencyResourceParams{
+		TenantID:       tenantID,
+		Scope:          scope,
+		IdempotencyKey: key,
+	})
+	if idemErr == nil && resourceID != "" {
+		if resourceID != checkoutID {
+			return Session{}, ErrCheckoutPatchSessionIdempotencyMismatch
+		}
+		row := tx.QueryRowContext(ctx, `
+SELECT id, tenant_id, region_id, customer_id, COALESCE(channel_id,''), COALESCE(shipping_method_id,''), COALESCE(shipping_address_country,''), COALESCE(shipping_address_postal_code,''), COALESCE(billing_address_country,''), COALESCE(billing_address_postal_code,''), status, currency, COALESCE(voucher_code,''), COALESCE(promotion_id,''), COALESCE(tax_class_id,''), COALESCE(country_code,''), subtotal_cents, shipping_cents, tax_cents, total_cents, updated_at
+FROM checkout_sessions
+WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+`, checkoutID, tenantID, regionID)
+		sess, scanErr := scanSession(row)
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			return Session{}, fmt.Errorf("%w: %q", ErrCheckoutPatchSessionIdempotencyOrphan, checkoutID)
+		}
+		if scanErr != nil {
+			return Session{}, scanErr
+		}
+		if err := tx.Commit(); err != nil {
+			return Session{}, err
+		}
+		return sess, nil
+	}
+	if idemErr != nil && !errors.Is(idemErr, sql.ErrNoRows) {
+		return Session{}, idemErr
+	}
+
+	res, err := tx.ExecContext(ctx, `
 UPDATE checkout_sessions
 SET voucher_code = NULLIF($4,''),
     promotion_id = NULLIF($5,''),
@@ -406,14 +462,28 @@ WHERE id = $1 AND tenant_id = $2 AND region_id = $3
 		return Session{}, err
 	}
 	if rows, _ := res.RowsAffected(); rows == 0 {
-		_, found, statusErr := r.sessionStatus(ctx, tenantID, regionID, checkoutID)
-		if statusErr != nil {
-			return Session{}, statusErr
-		}
-		if !found {
+		var st string
+		serr := tx.QueryRowContext(ctx, `
+SELECT status FROM checkout_sessions WHERE id = $1 AND tenant_id = $2 AND region_id = $3
+`, checkoutID, tenantID, regionID).Scan(&st)
+		if errors.Is(serr, sql.ErrNoRows) {
 			return Session{}, ErrSessionNotFound
 		}
+		if serr != nil {
+			return Session{}, serr
+		}
 		return Session{}, ErrSessionNotOpen
+	}
+	if err := qtx.SaveIdempotencyResource(ctx, dbsqlc.SaveIdempotencyResourceParams{
+		TenantID:       tenantID,
+		Scope:          scope,
+		IdempotencyKey: key,
+		ResourceID:     checkoutID,
+	}); err != nil {
+		return Session{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Session{}, err
 	}
 	return r.getSession(ctx, tenantID, regionID, checkoutID)
 }
